@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-label="Alpina VPN">
+  <!-- Defs: subtle silver gradient for the icon, matching the app's grayscale palette -->
+  <defs>
+    <linearGradient id="alpinaSilver" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.96"/>
+      <stop offset="60%" stop-color="#D6DDE5" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#8A98A8" stop-opacity="0.84"/>
+    </linearGradient>
+    <radialGradient id="alpinaMoon" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.08"/>
+      <stop offset="80%" stop-color="#FFFFFF" stop-opacity="0.02"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Soft moon disc — set behind the mountains -->
+  <circle cx="32" cy="28" r="18" fill="url(#alpinaMoon)" stroke="url(#alpinaSilver)" stroke-width="1.2" stroke-opacity="0.55"/>
+
+  <!-- Mountains — flat-topped triple-peak silhouette echoing the brand mark -->
+  <path
+    d="M9 44 L20 28 L25 34 L32 22 L40 32 L44 28 L55 44 Z"
+    fill="url(#alpinaSilver)"
+    stroke="#FFFFFF"
+    stroke-width="0.6"
+    stroke-opacity="0.35"
+    stroke-linejoin="round"
+  />
+
+  <!-- Snow ridge highlight -->
+  <path
+    d="M20 28 L23 31 M32 22 L29 26 M32 22 L35 26 M40 32 L37 29"
+    stroke="#FFFFFF"
+    stroke-width="0.9"
+    stroke-opacity="0.55"
+    stroke-linecap="round"
+  />
+
+  <!-- Tiny jet — echoes the original wordmark -->
+  <path
+    d="M44 17 L50 14 L48 18 L44 17 Z M48 18 L52 19"
+    fill="url(#alpinaSilver)"
+    stroke="none"
+  />
+</svg>

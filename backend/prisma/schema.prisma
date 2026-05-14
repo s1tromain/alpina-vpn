@@ -1,0 +1,340 @@
+// Alpina VPN — Prisma schema
+// PostgreSQL. All monetary amounts are stored as Decimal(12,2) in USD;
+// traffic counters in raw bytes (BigInt). Timestamps default to UTC.
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Enums
+// ──────────────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  user
+  operator
+  admin
+}
+
+enum OrderStatus {
+  pending
+  processing
+  approved
+  rejected
+  expired
+  cancelled
+}
+
+enum SubscriptionStatus {
+  active
+  expired
+  suspended
+}
+
+enum ServerStatus {
+  online
+  offline
+  maintenance
+}
+
+enum PlanDuration {
+  m1  @map("1m")
+  m3  @map("3m")
+  m6  @map("6m")
+  m12 @map("12m")
+}
+
+enum VpnProtocol {
+  Reality
+  VLESS
+  WireGuard
+}
+
+enum PaymentMethod {
+  card
+  crypto
+  bank
+}
+
+enum NotificationKind {
+  order_approved
+  order_rejected
+  subscription_activated
+  subscription_expiring
+  subscription_expired
+  system
+}
+
+enum AdminActionKind {
+  order_approve
+  order_reject
+  order_cancel
+  user_role_change
+  requisite_create
+  requisite_disable
+  requisite_delete
+  subscription_suspend
+  subscription_resume
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Users
+// ──────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id            String     @id @default(cuid())
+  telegramId    BigInt     @unique
+  username      String?
+  firstName     String
+  lastName      String?
+  photoUrl      String?
+  languageCode  String?
+  isPremium     Boolean    @default(false)
+  role          UserRole   @default(user)
+
+  registeredAt  DateTime   @default(now())
+  lastSeenAt    DateTime?
+  bannedAt      DateTime?
+  banReason     String?
+
+  orders         Order[]
+  subscriptions  Subscription[]
+  notifications  Notification[]
+  adminActions   AdminAction[] @relation("AdminActor")
+
+  @@index([role])
+  @@index([username])
+  @@map("users")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Catalog: Plans, Countries, VPN Servers
+// ──────────────────────────────────────────────────────────────────────────────
+
+model Plan {
+  id                String        @id @default(cuid())
+  // Stable slug used by the frontend (e.g. "1m", "3m", "6m", "12m")
+  slug              String        @unique
+  duration          PlanDuration
+  label             String
+  priceUsd          Decimal       @db.Decimal(12, 2)
+  monthlyEquivalent Decimal       @db.Decimal(12, 2)
+  maxDevices        Int           @default(3)
+  /// bytes per month; null = unlimited
+  trafficLimit      BigInt?
+  badge             String?
+  savingsPercent    Int?
+  features          String[]
+  active            Boolean       @default(true)
+  sortOrder         Int           @default(0)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  orders         Order[]
+  subscriptions  Subscription[]
+
+  @@index([active, sortOrder])
+  @@map("plans")
+}
+
+model Country {
+  // ISO-3166 alpha-2, e.g. "NL", "DE", "US"
+  code      String   @id
+  name      String
+  flag      String
+  /// Indicative ping in ms (display only)
+  ping      Int      @default(0)
+  /// Indicative load 0-100 (display only)
+  load      Int      @default(0)
+  premium   Boolean  @default(false)
+  active    Boolean  @default(true)
+
+  servers        VpnServer[]
+  orders         Order[]
+  subscriptions  Subscription[]
+
+  @@map("countries")
+}
+
+// Model name is `VpnServer` (not `VPNServer`) so Prisma's generated client
+// surface is the clean `prisma.vpnServer` rather than the awkward
+// `prisma.vPNServer` that consecutive-uppercase model names produce.
+model VpnServer {
+  id           String        @id @default(cuid())
+  countryCode  String
+  city         String
+  status       ServerStatus  @default(online)
+  /// 0–100
+  load         Int           @default(0)
+  ping         Int           @default(0)
+  /// Mbps
+  bandwidth    Int           @default(1000)
+  protocol     VpnProtocol   @default(Reality)
+  premium      Boolean       @default(false)
+
+  // Future Marzban integration — opaque external identifiers
+  marzbanNodeId   String?
+  marzbanInbound  String?
+
+  capacity     Int           @default(1000)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  country       Country        @relation(fields: [countryCode], references: [code])
+  subscriptions Subscription[]
+
+  @@index([countryCode, status])
+  @@map("vpn_servers")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Payments: requisites operators expose to users
+// ──────────────────────────────────────────────────────────────────────────────
+
+model PaymentRequisite {
+  id        String          @id @default(cuid())
+  method    PaymentMethod
+  label     String
+  address   String
+  currency  String
+  network   String?
+  active    Boolean         @default(true)
+  /// Aggregate (cached) received total — recomputed on order approval
+  receivedTotalUsd Decimal   @default(0) @db.Decimal(14, 2)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  deletedAt DateTime?
+
+  orders Order[]
+
+  @@index([active, method])
+  @@map("payment_requisites")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Orders & Subscriptions
+// ──────────────────────────────────────────────────────────────────────────────
+
+model Order {
+  id                  String        @id @default(cuid())
+  userId              String
+  planId              String
+  countryCode         String
+  paymentRequisiteId  String
+
+  amount              Decimal       @db.Decimal(12, 2)
+  currency            String        @default("USD")
+  status              OrderStatus   @default(pending)
+
+  /// Free-form payment reference (TX hash, last-4, etc.)
+  paymentReference    String?
+  /// Canned reference key, e.g. "awaitingOnChain"
+  paymentReferenceKey String?
+
+  /// Free-form operator note
+  note                String?
+  /// Canned note key, e.g. "paymentNotReceived"
+  noteKey             String?
+
+  createdAt           DateTime      @default(now())
+  reviewedAt          DateTime?
+  reviewedById        String?
+  expiresAt           DateTime?
+
+  user         User              @relation(fields: [userId], references: [id])
+  plan         Plan              @relation(fields: [planId], references: [id])
+  country      Country           @relation(fields: [countryCode], references: [code])
+  requisite    PaymentRequisite  @relation(fields: [paymentRequisiteId], references: [id])
+  subscription Subscription?
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@map("orders")
+}
+
+model Subscription {
+  id              String              @id @default(cuid())
+  userId          String
+  planId          String
+  countryCode     String
+  orderId         String?             @unique
+  serverId        String?
+
+  status          SubscriptionStatus  @default(active)
+  startedAt       DateTime            @default(now())
+  expiresAt       DateTime
+  /// Subscription URL handed to the client (vless://… or similar).
+  /// During MVP this is a placeholder; Marzban fills it in later.
+  subscriptionUrl String
+
+  maxDevices      Int                 @default(3)
+  activeDevices   Int                 @default(0)
+  /// bytes; null = unlimited
+  trafficLimit    BigInt?
+  trafficUsed     BigInt              @default(0)
+  autoRenew       Boolean             @default(false)
+
+  // Future Marzban link — opaque user id on Marzban side
+  marzbanUserId   String?             @unique
+
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  suspendedAt     DateTime?
+  suspendedReason String?
+
+  user    User       @relation(fields: [userId], references: [id])
+  plan    Plan       @relation(fields: [planId], references: [id])
+  country Country    @relation(fields: [countryCode], references: [code])
+  order   Order?     @relation(fields: [orderId], references: [id])
+  server  VpnServer? @relation(fields: [serverId], references: [id])
+
+  @@index([userId, status])
+  @@index([expiresAt])
+  @@map("subscriptions")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Notifications & Audit
+// ──────────────────────────────────────────────────────────────────────────────
+
+model Notification {
+  id        String            @id @default(cuid())
+  userId    String
+  kind      NotificationKind
+  /// Translation key — frontend localizes (e.g. "notifications.orderApproved.title")
+  titleKey  String
+  /// Translation key for body
+  bodyKey   String?
+  /// Free-form payload (orderId, subscriptionUrl, etc.)
+  payload   Json?
+  readAt    DateTime?
+  createdAt DateTime          @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, readAt, createdAt(sort: Desc)])
+  @@map("notifications")
+}
+
+model AdminAction {
+  id          String           @id @default(cuid())
+  actorId     String
+  kind        AdminActionKind
+  targetType  String
+  targetId    String
+  /// JSON diff or contextual payload
+  metadata    Json?
+  createdAt   DateTime         @default(now())
+
+  actor User @relation("AdminActor", fields: [actorId], references: [id])
+
+  @@index([actorId, createdAt(sort: Desc)])
+  @@index([targetType, targetId])
+  @@map("admin_actions")
+}

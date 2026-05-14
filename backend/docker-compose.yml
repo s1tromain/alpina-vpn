@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: alpinavpn-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: alpinavpn
+      POSTGRES_PASSWORD: alpinavpn
+      POSTGRES_DB: alpinavpn
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alpinavpn -d alpinavpn"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alpinavpn-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 4000
+      LOG_LEVEL: info
+      DATABASE_URL: postgresql://alpinavpn:alpinavpn@postgres:5432/alpinavpn?schema=public
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-7d}
+      ALLOW_DEV_AUTH: ${ALLOW_DEV_AUTH:-false}
+      TELEGRAM_AUTH_TTL_SECONDS: ${TELEGRAM_AUTH_TTL_SECONDS:-86400}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-120}
+      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-1 minute}
+      BOOTSTRAP_ADMIN_TELEGRAM_IDS: ${BOOTSTRAP_ADMIN_TELEGRAM_IDS:-}
+      VPN_PROVIDER: ${VPN_PROVIDER:-mock}
+    ports:
+      - "4000:4000"
+    command: sh -c "npx prisma migrate deploy && node dist/server.js"
+
+volumes:
+  postgres-data:

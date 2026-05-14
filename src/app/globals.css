@@ -1,0 +1,179 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 6% 5%;
+    --foreground: 0 0% 92%;
+
+    --card: 240 6% 8%;
+    --card-foreground: 0 0% 92%;
+
+    --popover: 240 6% 8%;
+    --popover-foreground: 0 0% 92%;
+
+    --primary: 0 0% 88%;
+    --primary-foreground: 240 6% 5%;
+
+    --secondary: 240 4% 14%;
+    --secondary-foreground: 0 0% 92%;
+
+    --muted: 240 4% 14%;
+    --muted-foreground: 240 4% 60%;
+
+    --accent: 240 4% 18%;
+    --accent-foreground: 0 0% 92%;
+
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 98%;
+
+    --success: 142 70% 45%;
+    --warning: 38 92% 55%;
+
+    --border: 240 4% 16%;
+    --input: 240 4% 16%;
+    --ring: 0 0% 70%;
+
+    --radius: 1rem;
+
+    /* Telegram viewport — kept in sync by `useTelegramViewport`. Fallback to
+       100dvh outside Telegram or before the first event lands. */
+    --tg-viewport-height: 100dvh;
+    --tg-viewport-stable-height: 100dvh;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background:
+      radial-gradient(1200px 600px at 50% -10%, rgba(192, 192, 192, 0.06), transparent 60%),
+      radial-gradient(800px 400px at 100% 100%, rgba(192, 192, 192, 0.04), transparent 70%),
+      linear-gradient(180deg, #0a0a0c 0%, #050506 100%);
+    min-height: 100dvh;
+    min-height: 100vh;
+  }
+
+  /* Telegram safe areas */
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  ::selection {
+    background: rgba(192, 192, 192, 0.2);
+    color: #fff;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(192, 192, 192, 0.15);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(192, 192, 192, 0.25);
+  }
+}
+
+@layer components {
+  .glass {
+    @apply relative overflow-hidden border border-white/[0.06] bg-white/[0.02] backdrop-blur-xl;
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+
+  .glass-strong {
+    @apply relative overflow-hidden border border-white/[0.08] bg-white/[0.04] backdrop-blur-2xl;
+    box-shadow:
+      0 20px 60px rgba(0, 0, 0, 0.5),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+
+  .text-gradient-silver {
+    background: linear-gradient(135deg, #ffffff 0%, #c0c0c0 50%, #8a8a8a 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .text-gradient-muted {
+    background: linear-gradient(135deg, #c0c0c0 0%, #76767c 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .divider-noble {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(192, 192, 192, 0.2) 50%,
+      transparent 100%
+    );
+    height: 1px;
+  }
+
+  .hairline {
+    border-color: rgba(255, 255, 255, 0.06);
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .pb-safe {
+    padding-bottom: max(env(safe-area-inset-bottom), 1rem);
+  }
+  .pt-safe {
+    padding-top: max(env(safe-area-inset-top), 1rem);
+  }
+
+  /* Telegram-aware full-height — use this instead of h-screen / h-dvh on
+     screens that contain a focusable input. Falls back to dvh when the
+     CSS variable hasn't been written (outside Telegram). */
+  .h-tg-stable {
+    height: var(--tg-viewport-stable-height);
+  }
+  .min-h-tg-stable {
+    min-height: var(--tg-viewport-stable-height);
+  }
+
+  /* Respect prefers-reduced-motion — turn off the splash breath + nav
+     spring on accessibility-conscious devices. */
+  @media (prefers-reduced-motion: reduce) {
+    .animate-brand-breath,
+    .animate-shimmer,
+    .animate-pulse-ring,
+    .animate-fade-in {
+      animation: none !important;
+    }
+    * {
+      transition-duration: 0.001ms !important;
+    }
+  }
+}

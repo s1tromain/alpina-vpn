@@ -1,0 +1,314 @@
+/**
+ * Typed API client. Talks to the Fastify backend over /api.
+ *
+ *   Resolution order for the base URL:
+ *     1. `NEXT_PUBLIC_API_URL` (e.g. "https://api.alpinavpn.example")
+ *     2. Empty string — meaning same-origin, paired with the Next.js
+ *        rewrite rule in `next.config.js` that proxies /api/* to the
+ *        backend during development.
+ *
+ *   Auth header precedence (matches backend's `authenticate` plugin):
+ *     1. `Authorization: Bearer <jwt>`     — preferred once we've logged in
+ *     2. `X-Telegram-Init-Data: <raw>`     — fallback on cold start before
+ *                                            POST /auth/telegram has run
+ *
+ *   Cross-cutting behaviour:
+ *     - 8 s default timeout (override per-call via `timeoutMs`).
+ *     - Caller-supplied `AbortSignal` is honoured AND chained with the
+ *       internal timeout signal — whichever fires first cancels the fetch.
+ *     - On 401 we invoke a single `onUnauthorized` callback (wired by
+ *       `useUserStore`) so every page sheds the stale JWT in one place
+ *       instead of each consumer rolling its own clearToken / re-login.
+ *
+ *   Errors are normalized to `ApiError` carrying `{status, code, details}`
+ *   from the backend's centralized error handler.
+ */
+
+import type {
+  AdminStats,
+  Country,
+  Order,
+  OrderStatus,
+  PaymentRequisite,
+  Plan,
+  Subscription,
+  User,
+  VPNServer,
+} from "@/types";
+import { getToken } from "./auth";
+
+const BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
+const DEFAULT_TIMEOUT_MS = 8_000;
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    public code: string,
+    message: string,
+    public details?: unknown,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+interface RequestOpts extends Omit<RequestInit, "body"> {
+  /** JSON-serializable body. Stringified for you. */
+  json?: unknown;
+  /** Raw initData fallback when no JWT is available yet. */
+  telegramInitData?: string;
+  /** Optional AbortSignal — chained with the internal timeout. */
+  signal?: AbortSignal;
+  /** Override the default 8 s timeout for this call. */
+  timeoutMs?: number;
+  /** Suppress the global 401 handler (e.g. for the auth handshake itself). */
+  skipUnauthorizedHandler?: boolean;
+}
+
+// ── Global 401 handler ─────────────────────────────────────────────────────
+// Registered once by `useUserStore`. Centralizes "JWT is stale" recovery.
+
+type UnauthorizedHandler = (err: ApiError) => void;
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+
+export function setUnauthorizedHandler(fn: UnauthorizedHandler | null) {
+  unauthorizedHandler = fn;
+}
+
+// ── Internal request runner ────────────────────────────────────────────────
+
+async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
+  const headers = new Headers(opts.headers);
+  if (opts.json !== undefined) headers.set("Content-Type", "application/json");
+
+  const token = getToken();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  } else if (opts.telegramInitData) {
+    headers.set("X-Telegram-Init-Data", opts.telegramInitData);
+  }
+
+  const url = `${BASE_URL}/api${path}`;
+
+  // Chain caller-supplied signal with our timeout. If the caller's signal
+  // is already aborted we short-circuit before fetching at all.
+  if (opts.signal?.aborted) {
+    throw new ApiError(0, "ABORTED", "Request aborted");
+  }
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  const onCallerAbort = () => ac.abort();
+  opts.signal?.addEventListener("abort", onCallerAbort, { once: true });
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...opts,
+      headers,
+      body: opts.json !== undefined ? JSON.stringify(opts.json) : undefined,
+      credentials: "include",
+      signal: ac.signal,
+    });
+  } catch (err) {
+    // Distinguish three failure modes that look the same from fetch's POV.
+    if (ac.signal.aborted) {
+      // Caller-driven OR our timeout — collapse into one error code.
+      const code = opts.signal?.aborted ? "ABORTED" : "TIMEOUT";
+      throw new ApiError(0, code, `Request ${code.toLowerCase()}`);
+    }
+    throw new ApiError(
+      0,
+      "NETWORK_ERROR",
+      err instanceof Error ? err.message : "Network request failed",
+    );
+  } finally {
+    clearTimeout(timer);
+    opts.signal?.removeEventListener("abort", onCallerAbort);
+  }
+
+  if (res.status === 204) return undefined as T;
+
+  // The backend always sends JSON, even for errors. If we get something
+  // else (e.g. an nginx 502 HTML page) we treat the body as an opaque blob.
+  let payload: unknown;
+  const ct = res.headers.get("content-type") ?? "";
+  if (ct.includes("application/json")) {
+    payload = await res.json().catch(() => null);
+  } else {
+    payload = await res.text().catch(() => null);
+  }
+
+  if (!res.ok) {
+    const errPayload = (payload ?? {}) as Partial<{
+      error: string;
+      message: string;
+      details: unknown;
+    }>;
+    const err = new ApiError(
+      res.status,
+      errPayload.error ?? "UNKNOWN",
+      errPayload.message ?? res.statusText,
+      errPayload.details,
+    );
+    if (res.status === 401 && !opts.skipUnauthorizedHandler) {
+      try {
+        unauthorizedHandler?.(err);
+      } catch {
+        /* keep the original error path */
+      }
+    }
+    throw err;
+  }
+
+  return payload as T;
+}
+
+// ── Login response shape ────────────────────────────────────────────────────
+
+export interface LoginResponse {
+  token: string;
+  isNewUser: boolean;
+  user: User;
+}
+
+// ── Endpoint surface ────────────────────────────────────────────────────────
+
+export const api = {
+  auth: {
+    /** Exchange Telegram initData for a JWT. Must be called once on cold start. */
+    telegram: (initData: string) =>
+      request<LoginResponse>("/auth/telegram", {
+        method: "POST",
+        json: { initData },
+        telegramInitData: initData,
+        // We're already handling auth here — don't recurse via the 401 hook.
+        skipUnauthorizedHandler: true,
+      }),
+    me: (initData?: string) =>
+      request<User>("/auth/me", { telegramInitData: initData }),
+  },
+
+  users: {
+    me: () => request<User>("/users/me"),
+    orders: () => request<Order[]>("/users/me/orders"),
+    subscription: () => request<Subscription | null>("/users/me/subscription"),
+  },
+
+  subscriptions: {
+    me: () => request<Subscription | null>("/subscriptions/me"),
+  },
+
+  orders: {
+    mine: () => request<Order[]>("/orders"),
+    get: (id: string) => request<Order>(`/orders/${encodeURIComponent(id)}`),
+    create: (body: { planId: string; countryCode: string; requisiteId: string }) =>
+      request<Order>("/orders", { method: "POST", json: body }),
+    markPaid: (orderId: string) =>
+      request<Order>(`/orders/${encodeURIComponent(orderId)}/paid`, {
+        method: "POST",
+      }),
+  },
+
+  plans: { list: () => request<Plan[]>("/plans") },
+  countries: { list: () => request<Country[]>("/countries") },
+  servers: { list: () => request<VPNServer[]>("/vpn/servers") },
+
+  payments: {
+    requisites: () => request<PaymentRequisite[]>("/payments/requisites"),
+  },
+
+  notifications: {
+    list: () =>
+      request<
+        Array<{
+          id: string;
+          kind: string;
+          titleKey: string;
+          bodyKey: string | null;
+          payload: unknown;
+          readAt: string | null;
+          createdAt: string;
+        }>
+      >("/notifications"),
+    unreadCount: () => request<{ count: number }>("/notifications/unread-count"),
+    markAllRead: () =>
+      request<{ ok: true; updated: number }>("/notifications/read-all", {
+        method: "POST",
+      }),
+    markRead: (id: string) =>
+      request<{ ok: true; updated: number }>(
+        `/notifications/${encodeURIComponent(id)}/read`,
+        { method: "POST" },
+      ),
+  },
+
+  admin: {
+    stats: () => request<AdminStats>("/admin/stats"),
+    users: (params?: { skip?: number; take?: number; search?: string }) =>
+      request<User[]>(`/admin/users${qs(params)}`),
+    orders: (params?: { status?: OrderStatus; skip?: number; take?: number }) =>
+      request<Order[]>(`/admin/orders${qs(params)}`),
+    setOrderStatus: (orderId: string, body: { status: OrderStatus; note?: string }) =>
+      request<Order>(`/admin/orders/${encodeURIComponent(orderId)}`, {
+        method: "PATCH",
+        json: body,
+      }),
+    setUserRole: (
+      userId: string,
+      role: "user" | "operator" | "admin",
+    ) =>
+      request<{ id: string; role: string }>(
+        `/admin/users/${encodeURIComponent(userId)}/role`,
+        { method: "PATCH", json: { role } },
+      ),
+    requisites: {
+      list: () => request<PaymentRequisite[]>("/admin/requisites"),
+      create: (body: Omit<PaymentRequisite, "id" | "receivedTotalUsd">) =>
+        request<PaymentRequisite>("/admin/requisites", {
+          method: "POST",
+          json: body,
+        }),
+      update: (
+        id: string,
+        body: Partial<{
+          active: boolean;
+          label: string;
+          address: string;
+          currency: string;
+          network: string | null;
+        }>,
+      ) =>
+        request<PaymentRequisite>(`/admin/requisites/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          json: body,
+        }),
+      remove: (id: string) =>
+        request<void>(`/admin/requisites/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        }),
+    },
+  },
+
+  health: {
+    db: () =>
+      request<{
+        status: "ok" | "unhealthy";
+        db: { ok: boolean; latencyMs?: number; error?: string };
+        uptimeSeconds: number;
+        vpnProvider: string;
+        timestamp: string;
+      }>("/../health/db"),
+  },
+};
+
+function qs(params?: Record<string, unknown>) {
+  if (!params) return "";
+  const entries = Object.entries(params).filter(
+    ([, v]) => v !== undefined && v !== null && v !== "",
+  );
+  if (entries.length === 0) return "";
+  const sp = new URLSearchParams();
+  for (const [k, v] of entries) sp.set(k, String(v));
+  return `?${sp.toString()}`;
+}

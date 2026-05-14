@@ -1,0 +1,140 @@
+# Alpina VPN — full production stack.
+#
+#   nginx (host :80/:443)
+#     ├── /            → frontend:3000   (Next.js Mini App)
+#     ├── /api/*       → backend:4000    (Fastify)
+#     └── /health[/db] → backend:4000
+#   backend  → postgres:5432
+#
+# Quick start (Ubuntu 24, after Docker is installed):
+#   cp .env.example .env
+#   cp backend/.env.example backend/.env
+#   nano .env backend/.env             # set secrets
+#   docker compose up -d --build
+#
+# See DEPLOYMENT.md for the full VPS guide (TLS via certbot, ufw, backups).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: alpinavpn-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-alpinavpn}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-alpinavpn}
+      POSTGRES_DB: ${POSTGRES_DB:-alpinavpn}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-alpinavpn} -d ${POSTGRES_DB:-alpinavpn}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: alpinavpn-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 4000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-alpinavpn}:${POSTGRES_PASSWORD:-alpinavpn}@postgres:5432/${POSTGRES_DB:-alpinavpn}?schema=public
+      CORS_ORIGINS: ${PUBLIC_FRONTEND_ORIGIN:?PUBLIC_FRONTEND_ORIGIN is required — set it in .env}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-7d}
+      ALLOW_DEV_AUTH: "false"
+      TELEGRAM_AUTH_TTL_SECONDS: ${TELEGRAM_AUTH_TTL_SECONDS:-86400}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-120}
+      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-1 minute}
+      BOOTSTRAP_ADMIN_TELEGRAM_IDS: ${BOOTSTRAP_ADMIN_TELEGRAM_IDS:-}
+      VPN_PROVIDER: ${VPN_PROVIDER:-mock}
+      MARZBAN_API_URL: ${MARZBAN_API_URL:-}
+      MARZBAN_API_USERNAME: ${MARZBAN_API_USERNAME:-}
+      MARZBAN_API_PASSWORD: ${MARZBAN_API_PASSWORD:-}
+    command: sh -c "npx prisma migrate deploy && node dist/server.js"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [internal]
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* must be baked at build time — they're inlined into
+        # the client bundle. Same-origin "/api" works because nginx proxies
+        # the /api path to the backend.
+        NEXT_PUBLIC_API_URL: ""
+        NEXT_PUBLIC_TELEGRAM_BOT_USERNAME: ${NEXT_PUBLIC_TELEGRAM_BOT_USERNAME}
+        NEXT_PUBLIC_SUPPORT_HANDLE: ${NEXT_PUBLIC_SUPPORT_HANDLE:-alpinavpn_support}
+    container_name: alpinavpn-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      # Used only by the Next.js dev rewrite proxy; not used in production
+      # because /api goes through nginx. Kept here for parity.
+      BACKEND_URL: http://backend:4000
+      ADMIN_ALLOWED_TELEGRAM_IDS: ${ADMIN_ALLOWED_TELEGRAM_IDS:-}
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [internal]
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: alpinavpn-nginx
+    restart: unless-stopped
+    depends_on:
+      - frontend
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/snippets:/etc/nginx/snippets:ro
+      # certbot writes to /etc/letsencrypt and exposes /var/www/certbot for
+      # the http-01 challenge. Both are read by nginx at request time.
+      - certbot-etc:/etc/letsencrypt:ro
+      - certbot-www:/var/www/certbot:ro
+    networks: [internal]
+
+  certbot:
+    image: certbot/certbot:latest
+    container_name: alpinavpn-certbot
+    volumes:
+      - certbot-etc:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+    # Run on demand via `docker compose run --rm certbot certonly ...`.
+    # See DEPLOYMENT.md for the first-time issuance + renewal cron.
+    entrypoint: ["sh", "-c", "trap exit TERM; while :; do sleep 12h & wait $${!}; certbot renew --webroot -w /var/www/certbot --quiet; done"]
+    networks: [internal]
+
+volumes:
+  postgres-data:
+  certbot-etc:
+  certbot-www:
+
+networks:
+  internal:
+    driver: bridge
