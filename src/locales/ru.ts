@@ -50,7 +50,7 @@ export const ru = {
   },
 
   brand: {
-    tagline: "Скромность — по дизайну.",
+    tagline: "Secure · Premium · Refined",
   },
 
   bootstrap: {
@@ -94,10 +94,6 @@ export const ru = {
   home: {
     welcome: "Добро пожаловать",
     welcomeName: "Добро пожаловать, {name}",
-    heroTitleLine1: "Тише интернет,",
-    heroTitleLine2: "благороднее.",
-    heroSubtitle:
-      "Сдержанный приватный доступ без логов и с консьерж-поддержкой — целиком внутри Telegram.",
     locationsEyebrow: "Локации",
     locationsTitle: "Доступные страны",
     locationsAll: "Все",
@@ -106,19 +102,52 @@ export const ru = {
     membershipDesc: "Чем длиннее срок, тем мягче цена.",
     whyEyebrow: "Стандарт дома",
     whyTitle: "Почему Alpina VPN",
-    footerTagline: "Скромность — по дизайну.",
+    actionsEyebrow: "Доступ",
+    actionsTitle: "Управление",
   },
 
-  vpnStatus: {
-    eyebrow: "Статус туннеля",
-    protected: "Защищено",
-    establishing: "Подключение…",
-    idle: "Не активен",
-    uptime: "Время",
+  homeHeader: {
+    protected: "Reality Protocol",
+    inactive: "Подписка неактивна",
+    daysLeft: "{n} д осталось",
+  },
+
+  dashboard: {
+    eyebrow: "Подписка",
+    statusActive: "Активна",
+    statusInactive: "Неактивна",
+    server: "Сервер",
+    ping: "Пинг",
+    expires: "Истекает",
+    daysLeft: "Дней осталось",
     protocol: "Протокол",
-    ipShield: "IP-щит",
+    cipher: "Шифрование",
+    traffic: "Трафик",
+    trafficUnlimited: "{used} · безлимит",
+    devices: "Устройства",
+    inactiveTitle: "Нет активной подписки",
+    inactiveDesc:
+      "Активируйте подписку, чтобы получить доступ к серверам, конфигурации и QR-коду подключения.",
     activate: "Активировать подписку",
-    plans: "Тарифы",
+  },
+
+  actions: {
+    config: {
+      title: "Скачать конфиг",
+      subtitle: "VLESS · Reality",
+    },
+    qr: {
+      title: "Показать QR-код",
+      subtitle: "Быстрое подключение",
+    },
+    guide: {
+      title: "Инструкции",
+      subtitle: "iOS · Android · Windows · macOS",
+    },
+    devices: {
+      title: "Мои устройства",
+      subtitle: "Управление подключениями",
+    },
   },
 
   features: {
@@ -325,7 +354,6 @@ export const ru = {
     browse: "Выбрать тариф",
     supportTitle: "Поддержка и FAQ",
     supportDesc: "Связаться с консьержем или прочитать частые вопросы",
-    signOut: "Завершить сессию",
     settings: {
       eyebrow: "Настройки",
       title: "Предпочтения",

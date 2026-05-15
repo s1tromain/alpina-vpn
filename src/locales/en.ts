@@ -52,7 +52,7 @@ export const en: Dict = {
   },
 
   brand: {
-    tagline: "Discretion, by design.",
+    tagline: "Secure · Premium · Refined",
   },
 
   bootstrap: {
@@ -96,10 +96,6 @@ export const en: Dict = {
   home: {
     welcome: "Welcome back",
     welcomeName: "Welcome, {name}",
-    heroTitleLine1: "A quieter",
-    heroTitleLine2: "internet, refined.",
-    heroSubtitle:
-      "Discreet, no-log private networking with concierge support — handled entirely inside Telegram.",
     locationsEyebrow: "Locations",
     locationsTitle: "Available countries",
     locationsAll: "All",
@@ -108,19 +104,52 @@ export const en: Dict = {
     membershipDesc: "Longer terms, gentler pricing.",
     whyEyebrow: "The house standard",
     whyTitle: "Why Alpina VPN",
-    footerTagline: "Discretion, by design.",
+    actionsEyebrow: "Access",
+    actionsTitle: "Manage",
   },
 
-  vpnStatus: {
-    eyebrow: "Tunnel status",
-    protected: "Protected",
-    establishing: "Establishing…",
-    idle: "Idle",
-    uptime: "Uptime",
+  homeHeader: {
+    protected: "Reality Protocol",
+    inactive: "Inactive subscription",
+    daysLeft: "{n} d left",
+  },
+
+  dashboard: {
+    eyebrow: "Subscription",
+    statusActive: "Active",
+    statusInactive: "Inactive",
+    server: "Server",
+    ping: "Ping",
+    expires: "Expires",
+    daysLeft: "Days left",
     protocol: "Protocol",
-    ipShield: "IP shield",
+    cipher: "Encryption",
+    traffic: "Traffic",
+    trafficUnlimited: "{used} · unlimited",
+    devices: "Devices",
+    inactiveTitle: "No active subscription",
+    inactiveDesc:
+      "Activate a subscription to unlock servers, config download and the QR-pairing flow.",
     activate: "Activate subscription",
-    plans: "Plans",
+  },
+
+  actions: {
+    config: {
+      title: "Download config",
+      subtitle: "VLESS · Reality",
+    },
+    qr: {
+      title: "Show QR code",
+      subtitle: "Quick pairing",
+    },
+    guide: {
+      title: "Connection guide",
+      subtitle: "iOS · Android · Windows · macOS",
+    },
+    devices: {
+      title: "My devices",
+      subtitle: "Manage connections",
+    },
   },
 
   features: {
@@ -327,7 +356,6 @@ export const en: Dict = {
     browse: "Browse plans",
     supportTitle: "Support & FAQ",
     supportDesc: "Reach the concierge or browse common questions",
-    signOut: "Sign out of session",
     settings: {
       eyebrow: "Settings",
       title: "Preferences",

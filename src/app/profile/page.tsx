@@ -7,7 +7,6 @@ import {
   Crown,
   Hash,
   LifeBuoy,
-  LogOut,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
@@ -226,15 +225,6 @@ export default function ProfilePage() {
               </div>
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </Link>
-
-            <Button
-              variant="secondary"
-              size="lg"
-              className="w-full text-muted-foreground"
-            >
-              <LogOut className="h-4 w-4" />
-              {t.profile.signOut}
-            </Button>
           </section>
         </>
       )}
