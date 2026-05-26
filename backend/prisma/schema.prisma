@@ -63,6 +63,8 @@ enum PaymentMethod {
 }
 
 enum NotificationKind {
+  order_pending
+  order_processing
   order_approved
   order_rejected
   subscription_activated
@@ -81,6 +83,7 @@ enum AdminActionKind {
   requisite_delete
   subscription_suspend
   subscription_resume
+  receipt_upload
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -247,15 +250,51 @@ model Order {
   reviewedById        String?
   expiresAt           DateTime?
 
+  /// Telegram chat id (channel/group) the moderation message was posted to.
+  /// Stored as String because Telegram supergroup ids are 64-bit negatives.
+  telegramModerationChatId    String?
+  /// Last Telegram message id used for this order's moderation card.
+  /// Updated when we re-post the card (e.g. after a receipt upload converts
+  /// a text-only message into a photo+caption one).
+  telegramModerationMessageId Int?
+
   user         User              @relation(fields: [userId], references: [id])
   plan         Plan              @relation(fields: [planId], references: [id])
   country      Country           @relation(fields: [countryCode], references: [code])
   requisite    PaymentRequisite  @relation(fields: [paymentRequisiteId], references: [id])
   subscription Subscription?
+  receipts     Receipt[]
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([status, createdAt(sort: Desc)])
   @@map("orders")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Receipts — payment proof images uploaded by users.
+// ──────────────────────────────────────────────────────────────────────────────
+
+model Receipt {
+  id           String   @id @default(cuid())
+  orderId      String
+  /// Relative path under RECEIPTS_STORAGE_DIR, e.g. "<orderId>/<uuid>.jpg".
+  /// Never exposed verbatim to clients — admins fetch via /admin/receipts/:id/file.
+  storagePath  String
+  /// MIME type as reported by multipart, validated against an allowlist.
+  mimeType     String
+  /// Size in bytes — handy for the admin UI and quota checks.
+  sizeBytes    Int
+  /// SHA-256 of the file content, used to dedupe re-uploads and as an audit hash.
+  checksum     String
+  /// Telegram file_id, set after the receipt is forwarded to the moderation
+  /// channel. Allows us to re-send the receipt without re-uploading the blob.
+  telegramFileId String?
+  createdAt    DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt(sort: Desc)])
+  @@map("receipts")
 }
 
 model Subscription {

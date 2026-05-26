@@ -1,10 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Check, X, Search, Loader2 } from "lucide-react";
+import { Check, X, Search, Loader2, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { AdminTopbar } from "@/components/admin/admin-topbar";
 import { DataTable } from "@/components/admin/data-table";
+import { ReceiptViewer } from "@/components/admin/receipt-viewer";
+import { RejectOrderDialog } from "@/components/admin/reject-order-dialog";
 import { StatusPill } from "@/components/shared/status-pill";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +20,7 @@ import { api, ApiError } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
 import { useTranslations, format } from "@/hooks/use-translations";
 import { useFormatters } from "@/hooks/use-formatters";
-import type { Order, OrderStatus } from "@/types";
+import type { Order, OrderNoteKey, OrderStatus } from "@/types";
 
 type Filter = "all" | "pending" | "processing" | "approved" | "rejected";
 
@@ -57,10 +59,14 @@ export default function AdminOrdersPage() {
       );
   }, [orders, tab, q]);
 
-  async function update(id: string, status: OrderStatus) {
+  async function update(
+    id: string,
+    status: OrderStatus,
+    extra: { note?: string; noteKey?: OrderNoteKey } = {},
+  ) {
     setBusy((prev) => ({ ...prev, [id]: status }));
     try {
-      await api.admin.setOrderStatus(id, { status });
+      await api.admin.setOrderStatus(id, { status, ...extra });
       const shortId = id.slice(-6);
       const msg =
         status === "approved"
@@ -84,10 +90,24 @@ export default function AdminOrdersPage() {
   }
 
   function actionFor(o: Order) {
+    const pending = busy[o.id];
+    const hasReceipts = (o.receiptCount ?? 0) > 0;
+    const receiptBtn = hasReceipts ? (
+      <ReceiptViewer
+        orderId={o.id}
+        initialReceipt={o.latestReceipt}
+        trigger={
+          <Button size="sm" variant="ghost" title="Просмотреть чек">
+            <FileText className="h-3.5 w-3.5" />
+          </Button>
+        }
+      />
+    ) : null;
+
     if (o.status === "pending" || o.status === "processing") {
-      const pending = busy[o.id];
       return (
         <div className="flex justify-end gap-2">
+          {receiptBtn}
           <Button
             size="sm"
             onClick={() => void update(o.id, "approved")}
@@ -100,26 +120,30 @@ export default function AdminOrdersPage() {
             )}
             {t.admin.orders.approve}
           </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => void update(o.id, "rejected")}
-            disabled={!!pending}
-          >
-            {pending === "rejected" ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <X className="h-3.5 w-3.5" />
-            )}
-            {t.admin.orders.reject}
-          </Button>
+          <RejectOrderDialog
+            orderId={o.id}
+            onConfirm={(body) => update(o.id, "rejected", body)}
+            trigger={
+              <Button size="sm" variant="secondary" disabled={!!pending}>
+                {pending === "rejected" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <X className="h-3.5 w-3.5" />
+                )}
+                {t.admin.orders.reject}
+              </Button>
+            }
+          />
         </div>
       );
     }
     return (
-      <Button size="sm" variant="ghost">
-        {t.common.view}
-      </Button>
+      <div className="flex justify-end gap-2">
+        {receiptBtn}
+        <Button size="sm" variant="ghost">
+          {t.common.view}
+        </Button>
+      </div>
     );
   }
 

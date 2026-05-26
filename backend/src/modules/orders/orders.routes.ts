@@ -6,9 +6,10 @@ import {
 } from "./orders.dto.js";
 import { validateBody, validateParams } from "../../utils/zod.js";
 import { toOrderDto } from "../users/users.mapper.js";
+import { buildOrdersSideEffects } from "./orders.side-effects.js";
 
 export const ordersRoutes: FastifyPluginAsync = async (app) => {
-  const orders = new OrdersService(app.prisma);
+  const orders = new OrdersService(app.prisma, buildOrdersSideEffects(app));
   app.addHook("preHandler", app.authenticate);
 
   /** GET /orders — current user's purchase history (alias of /users/me/orders). */
@@ -36,6 +37,17 @@ export const ordersRoutes: FastifyPluginAsync = async (app) => {
   app.post("/orders/:id/paid", async (req) => {
     const { id } = validateParams(req, orderIdParamsSchema);
     const order = await orders.markPaidByUser(id, req.user!.id);
+    return toOrderDto(order);
+  });
+
+  /**
+   * POST /orders/:id/cancel — user cancels an order they no longer want to pay.
+   * Only allowed while still pending/processing; closes out the moderation
+   * card too via the same post-commit hook the admin flow uses.
+   */
+  app.post("/orders/:id/cancel", async (req) => {
+    const { id } = validateParams(req, orderIdParamsSchema);
+    const order = await orders.cancelByUser(id, req.user!.id);
     return toOrderDto(order);
   });
 };

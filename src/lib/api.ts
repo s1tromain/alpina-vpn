@@ -28,9 +28,11 @@ import type {
   AdminStats,
   Country,
   Order,
+  OrderNoteKey,
   OrderStatus,
   PaymentRequisite,
   Plan,
+  ReceiptSummary,
   Subscription,
   User,
   VPNServer,
@@ -208,6 +210,44 @@ export const api = {
       request<Order>(`/orders/${encodeURIComponent(orderId)}/paid`, {
         method: "POST",
       }),
+    cancel: (orderId: string) =>
+      request<Order>(`/orders/${encodeURIComponent(orderId)}/cancel`, {
+        method: "POST",
+      }),
+    /**
+     * Upload a payment receipt for an open order. Send a single File/Blob
+     * (jpg/png/webp/pdf, ≤8 MiB). Sets order to "processing" and posts the
+     * receipt to the operator moderation channel.
+     */
+    uploadReceipt: async (orderId: string, file: Blob) => {
+      const form = new FormData();
+      form.append("file", file);
+      const token = getToken();
+      const headers = new Headers();
+      if (token) headers.set("Authorization", `Bearer ${token}`);
+      const res = await fetch(
+        `${BASE_URL}/api/orders/${encodeURIComponent(orderId)}/receipt`,
+        { method: "POST", headers, body: form, credentials: "include" },
+      );
+      const payload = await res
+        .json()
+        .catch(() => ({ error: "UNKNOWN", message: res.statusText }));
+      if (!res.ok) {
+        throw new ApiError(
+          res.status,
+          (payload as { error?: string }).error ?? "UNKNOWN",
+          (payload as { message?: string }).message ?? res.statusText,
+          (payload as { details?: unknown }).details,
+        );
+      }
+      return payload as {
+        id: string;
+        orderId: string;
+        mimeType: string;
+        sizeBytes: number;
+        createdAt: string;
+      };
+    },
   },
 
   plans: { list: () => request<Plan[]>("/plans") },
@@ -249,11 +289,33 @@ export const api = {
       request<User[]>(`/admin/users${qs(params)}`),
     orders: (params?: { status?: OrderStatus; skip?: number; take?: number }) =>
       request<Order[]>(`/admin/orders${qs(params)}`),
-    setOrderStatus: (orderId: string, body: { status: OrderStatus; note?: string }) =>
+    setOrderStatus: (
+      orderId: string,
+      body: { status: OrderStatus; note?: string; noteKey?: OrderNoteKey },
+    ) =>
       request<Order>(`/admin/orders/${encodeURIComponent(orderId)}`, {
         method: "PATCH",
         json: body,
       }),
+    orderReceipts: (orderId: string) =>
+      request<ReceiptSummary[]>(
+        `/admin/orders/${encodeURIComponent(orderId)}/receipts`,
+      ),
+    /**
+     * Build an authenticated URL the admin UI can hand to an `<img>` or
+     * `<a download>`. We append the JWT as a query parameter so the browser
+     * can fetch it without a custom header (CORS pre-flight on `<img>` is
+     * impossible). The token has the user's role baked in — the backend
+     * still verifies it on every request.
+     *
+     * For PDF receipts the same URL triggers the file download via the
+     * backend's `Content-Disposition: attachment` header.
+     */
+    receiptFileUrl: (receiptId: string) => {
+      const token = getToken();
+      const q = token ? `?token=${encodeURIComponent(token)}` : "";
+      return `${BASE_URL}/api/admin/receipts/${encodeURIComponent(receiptId)}/file${q}`;
+    },
     setUserRole: (
       userId: string,
       role: "user" | "operator" | "admin",

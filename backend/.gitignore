@@ -6,3 +6,7 @@ dist
 .DS_Store
 coverage
 prisma/migrations/dev.db*
+
+# Uploaded receipts — payment proofs, never check in.
+storage/receipts/*
+!storage/receipts/.gitkeep

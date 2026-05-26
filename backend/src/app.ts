@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
+import multipart from "@fastify/multipart";
 import "./lib/json.js"; // installs BigInt.toJSON
+import { env } from "./config/env.js";
 import { loggerOptions } from "./lib/logger.js";
 import { prismaPlugin } from "./plugins/prisma.plugin.js";
 import { securityPlugin } from "./plugins/security.plugin.js";
@@ -10,6 +12,7 @@ import { requestLoggingPlugin } from "./plugins/request-logging.plugin.js";
 import { registerModules } from "./modules/index.js";
 import { healthRoutes } from "./modules/health/health.routes.js";
 import { startSubscriptionExpirySweep } from "./modules/subscriptions/subscriptions.cron.js";
+import { telegramPlugin } from "./modules/telegram/telegram.plugin.js";
 
 /**
  * Builds a Fastify instance with the full middleware/plugin stack. Exposed
@@ -46,6 +49,23 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(requestLoggingPlugin);
   await app.register(securityPlugin);
   await app.register(authPlugin);
+
+  // Multipart only for the receipts upload route — body is buffered in
+  // memory up to RECEIPTS_MAX_BYTES, then the service streams it to disk.
+  await app.register(multipart, {
+    limits: {
+      fileSize: env.RECEIPTS_MAX_BYTES,
+      files: 1,
+      fields: 0,
+      // Reject deeply nested multipart that could amplify into OOM.
+      headerPairs: 200,
+    },
+    // Don't auto-attach files to req.body; we use the streaming `req.file()`
+    // helper inside receipts.routes for explicit error handling.
+    attachFieldsToBody: false,
+  });
+
+  await app.register(telegramPlugin);
 
   await app.register(healthRoutes);
   await registerModules(app, { prefix: "/api" });

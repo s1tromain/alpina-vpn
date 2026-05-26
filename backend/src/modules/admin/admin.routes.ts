@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { AdminService } from "./admin.service.js";
 import { OrdersService } from "../orders/orders.service.js";
+import { buildOrdersSideEffects } from "../orders/orders.side-effects.js";
 import { UsersService } from "../users/users.service.js";
 import { RequisitesService } from "../requisites/requisites.service.js";
 import {
@@ -35,7 +36,7 @@ import {
  */
 export const adminRoutes: FastifyPluginAsync = async (app) => {
   const admin = new AdminService(app.prisma);
-  const orders = new OrdersService(app.prisma);
+  const orders = new OrdersService(app.prisma, buildOrdersSideEffects(app));
   const users = new UsersService(app.prisma);
   const requisites = new RequisitesService(app.prisma);
 

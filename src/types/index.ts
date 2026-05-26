@@ -114,6 +114,13 @@ export interface PaymentRequisite {
   receivedTotalUsd?: number;
 }
 
+export interface ReceiptSummary {
+  id: string;
+  mimeType: string;
+  sizeBytes: number;
+  createdAt: string;
+}
+
 export interface Order {
   id: string;
   userId: string;
@@ -137,6 +144,10 @@ export interface Order {
   note?: string;
   /** Canned note key, resolved via `t.orderNotes[key]`. */
   noteKey?: OrderNoteKey;
+  /** Present on admin lists. Number of receipts attached to this order. */
+  receiptCount?: number;
+  /** Most recent receipt summary (id + mime + size), if any. */
+  latestReceipt?: ReceiptSummary;
 }
 
 export interface FaqItem {

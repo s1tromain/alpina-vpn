@@ -2,7 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { SubscriptionsRepository } from "./subscriptions.repository.js";
 import { getVpnProvider } from "../vpn/index.js";
 import { ConflictError, NotFoundError, UnprocessableError } from "../../lib/errors.js";
-import type { Order, Plan, Subscription } from "@prisma/client";
+import type { Order, Plan, Subscription, User } from "@prisma/client";
 
 const DURATION_DAYS: Record<Plan["duration"], number> = {
   m1: 30,
@@ -178,20 +178,48 @@ export class SubscriptionsService {
    * Background job entrypoint — call from a cron/worker. Finds any active
    * subscription whose expiresAt is now in the past and transitions it to
    * `expired`. Returns the count of transitions for the caller to log.
+   * Calls the optional `onExpire` hook AFTER the DB update so callers
+   * (e.g. the Telegram notifier) can DM the user without blocking the row.
    */
-  async expireDueSubscriptions(): Promise<number> {
+  async expireDueSubscriptions(
+    onExpire?: (sub: Subscription & { plan: Plan; country: { code: string; name: string } }) => Promise<void>,
+  ): Promise<number> {
     const due = await this.repo.findExpiringBefore(new Date());
     let count = 0;
     for (const sub of due) {
       try {
-        await this.expireSubscription(sub.id);
+        const updated = await this.expireSubscription(sub.id);
         count++;
+        if (onExpire) {
+          // Notify after the DB transition. Hook is responsible for its
+          // own try/catch — a notifier hiccup must not block the sweep.
+          await onExpire(updated).catch(() => {
+            /* hook logs upstream */
+          });
+        }
       } catch {
         // Skip individual failures — a single bad row shouldn't halt the sweep.
         // The error handler logs upstream; the sweep should keep going.
       }
     }
     return count;
+  }
+
+  /**
+   * Find subscriptions whose `expiresAt` falls in the window
+   *   (now + minDays - 1 day, now + minDays]
+   * — i.e. those crossing the `minDays`-left threshold today. Used by the
+   * daily reminder sweep to DM users 3 days and 1 day before expiry.
+   *
+   * We use a 24h window (not "exactly N days") so a single missed run
+   * (deploy lag, container restart) doesn't cause us to drop the
+   * notification for that day's cohort.
+   */
+  async findExpiringInDays(minDays: number) {
+    const now = Date.now();
+    const to = new Date(now + minDays * 24 * 60 * 60 * 1000);
+    const from = new Date(now + (minDays - 1) * 24 * 60 * 60 * 1000);
+    return this.repo.findExpiringBetween(from, to);
   }
 
   private async requireSubscription(id: string): Promise<

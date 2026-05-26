@@ -91,6 +91,16 @@ export interface OrderDto {
   paymentReferenceKey?: string;
   note?: string;
   noteKey?: string;
+  /// Number of receipts attached. Surfaced on admin lists so a moderator
+  /// can spot "no proof yet" orders at a glance without a second fetch.
+  receiptCount?: number;
+  /// Latest receipt summary — admin can drag it open via the modal.
+  latestReceipt?: {
+    id: string;
+    mimeType: string;
+    sizeBytes: number;
+    createdAt: string;
+  };
 }
 
 export interface PaymentRequisiteDto {
@@ -209,9 +219,20 @@ export interface OrderWithRelations extends Order {
   user: User;
   plan: Plan;
   country: Country;
+  receipts?: Array<{
+    id: string;
+    mimeType: string;
+    sizeBytes: number;
+    createdAt: Date;
+  }>;
 }
 
 export function toOrderDto(order: OrderWithRelations): OrderDto {
+  const receipts = order.receipts ?? [];
+  // Receipts are ordered by createdAt DESC in the repository, so the head
+  // is always the most recent. Defensive `[0]` access is required because
+  // `noUncheckedIndexedAccess` is on in tsconfig.
+  const latest = receipts[0];
   return {
     id: order.id,
     userId: order.userId,
@@ -231,6 +252,21 @@ export function toOrderDto(order: OrderWithRelations): OrderDto {
     paymentReferenceKey: order.paymentReferenceKey ?? undefined,
     note: order.note ?? undefined,
     noteKey: order.noteKey ?? undefined,
+    ...(order.receipts !== undefined
+      ? {
+          receiptCount: receipts.length,
+          ...(latest
+            ? {
+                latestReceipt: {
+                  id: latest.id,
+                  mimeType: latest.mimeType,
+                  sizeBytes: latest.sizeBytes,
+                  createdAt: latest.createdAt.toISOString(),
+                },
+              }
+            : {}),
+        }
+      : {}),
   };
 }
 

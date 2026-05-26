@@ -37,6 +37,21 @@ export class SubscriptionsRepository {
     });
   }
 
+  /**
+   * Active subscriptions whose `expiresAt` is in the (from, to] window.
+   * Used by the daily reminder sweep — caller passes a 24h window per
+   * notification threshold (e.g. 3-day and 1-day warnings).
+   */
+  findExpiringBetween(from: Date, to: Date) {
+    return this.prisma.subscription.findMany({
+      where: {
+        status: "active",
+        expiresAt: { gt: from, lte: to },
+      },
+      include: { plan: true, country: true, user: true },
+    });
+  }
+
   findById(id: string) {
     return this.prisma.subscription.findUnique({
       where: { id },

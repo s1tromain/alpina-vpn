@@ -1,4 +1,4 @@
-import type { PrismaClient, OrderStatus, Prisma } from "@prisma/client";
+import type { PrismaClient, OrderStatus, Prisma, Subscription } from "@prisma/client";
 import {
   ConflictError,
   ForbiddenError,
@@ -9,6 +9,23 @@ import {
 import { OrdersRepository } from "./orders.repository.js";
 import { SubscriptionsService } from "../subscriptions/subscriptions.service.js";
 import type { CreateOrderDto, UpdateOrderStatusDto } from "./orders.dto.js";
+import type { OrderWithRelations } from "../users/users.mapper.js";
+
+/**
+ * Side-effect callbacks fired AFTER the DB transaction has committed. Kept
+ * optional so unit tests, the admin panel, and the Telegram bot can each
+ * call OrdersService without dragging in the Telegram stack. The routes
+ * layer wires the concrete handlers (`ModerationService`, `TelegramNotifier`).
+ */
+export interface OrdersSideEffects {
+  onOrderCreated?: (order: OrderWithRelations) => Promise<void> | void;
+  onOrderProcessing?: (order: OrderWithRelations) => Promise<void> | void;
+  onOrderResolved?: (
+    order: OrderWithRelations,
+    decision: { status: "approved" | "rejected" | "cancelled" | "expired"; reviewerName?: string; reasonLabel?: string },
+    subscription: Subscription | null,
+  ) => Promise<void> | void;
+}
 
 const TERMINAL_STATUSES: OrderStatus[] = [
   "approved",
@@ -23,10 +40,15 @@ const ORDER_TTL_HOURS = 24;
 export class OrdersService {
   private readonly repo: OrdersRepository;
   private readonly subs: SubscriptionsService;
+  private readonly sideEffects: OrdersSideEffects;
 
-  constructor(private readonly prisma: PrismaClient) {
+  constructor(
+    private readonly prisma: PrismaClient,
+    sideEffects: OrdersSideEffects = {},
+  ) {
     this.repo = new OrdersRepository(prisma);
     this.subs = new SubscriptionsService(prisma);
+    this.sideEffects = sideEffects;
   }
 
   listForUser(userId: string) {
@@ -74,7 +96,7 @@ export class OrdersService {
       });
     }
 
-    return this.repo.create({
+    const created = await this.repo.create({
       user: { connect: { id: userId } },
       plan: { connect: { id: plan.id } },
       country: { connect: { code: country.code } },
@@ -84,6 +106,16 @@ export class OrdersService {
       status: "pending",
       expiresAt: new Date(Date.now() + ORDER_TTL_HOURS * 60 * 60 * 1000),
     });
+
+    // Fire-and-forget post-commit hook — never blocks the API response on
+    // Telegram availability. Errors are swallowed by the registered handler.
+    if (this.sideEffects.onOrderCreated) {
+      void Promise.resolve(this.sideEffects.onOrderCreated(created)).catch(() => {
+        /* hook owner is responsible for its own logging */
+      });
+    }
+
+    return created;
   }
 
   /**
@@ -121,8 +153,8 @@ export class OrdersService {
       // Order update + (optional) notification + audit row must all commit
       // together; a partial write would leave moderators with an order in
       // status X but no audit trail of who moved it there.
-      return this.prisma.$transaction(async (tx) => {
-        const updated = await tx.order.update({
+      const updated = await this.prisma.$transaction(async (tx) => {
+        const row = await tx.order.update({
           where: { id: orderId },
           data: patch,
           include: { user: true, plan: true, country: true },
@@ -131,18 +163,44 @@ export class OrdersService {
         if (dto.status === "rejected") {
           await tx.notification.create({
             data: {
-              userId: updated.userId,
+              userId: row.userId,
               kind: "order_rejected",
               titleKey: "notifications.orderRejected.title",
               bodyKey: "notifications.orderRejected.body",
-              payload: { orderId: updated.id, reasonKey: dto.noteKey ?? null },
+              payload: { orderId: row.id, reasonKey: dto.noteKey ?? null },
             },
           });
         }
 
-        await this.recordAdminActionTx(tx, actorId, dto.status, updated.id);
-        return updated;
+        await this.recordAdminActionTx(tx, actorId, dto.status, row.id);
+        return row;
       });
+
+      // After-commit side effects: edit moderation card, DM user.
+      // `dto.status` here is one of "pending" | "processing" | "rejected" |
+      // "cancelled" | "expired"; the post-commit hook only fires for the
+      // terminal kinds the bot/admin UI knows how to render.
+      if (
+        this.sideEffects.onOrderResolved &&
+        (dto.status === "rejected" || dto.status === "cancelled" || dto.status === "expired")
+      ) {
+        const reviewerName = await this.lookupReviewerName(actorId);
+        void Promise.resolve(
+          this.sideEffects.onOrderResolved(
+            updated,
+            {
+              status: dto.status,
+              reviewerName,
+              ...(dto.note ? { reasonLabel: dto.note } : {}),
+            },
+            null,
+          ),
+        ).catch(() => {
+          /* hook owner logs */
+        });
+      }
+
+      return updated;
     }
 
     // ── APPROVE path ──────────────────────────────────────────────────────
@@ -151,38 +209,83 @@ export class OrdersService {
     // everything back, including the upstream VPN provisioning call's row
     // — though note we cannot un-mint a real Marzban user; see README for
     // the at-least-once semantics caveat.
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.order.update({
+    const { updated, subscription } = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.order.update({
         where: { id: orderId },
         data: patch,
         include: { user: true, plan: true, country: true },
       });
 
-      const subscription = await this.subs.createFromOrder(updated, {
+      const sub = await this.subs.createFromOrder(row, {
         tx: tx as unknown as PrismaClient,
       });
 
       await tx.paymentRequisite.update({
-        where: { id: updated.paymentRequisiteId },
-        data: { receivedTotalUsd: { increment: updated.amount } },
+        where: { id: row.paymentRequisiteId },
+        data: { receivedTotalUsd: { increment: row.amount } },
       });
 
       await tx.notification.create({
         data: {
-          userId: updated.userId,
+          userId: row.userId,
           kind: "subscription_activated",
           titleKey: "notifications.subscriptionActivated.title",
           bodyKey: "notifications.subscriptionActivated.body",
           payload: {
-            orderId: updated.id,
-            subscriptionId: subscription.id,
-            subscriptionUrl: subscription.subscriptionUrl,
+            orderId: row.id,
+            subscriptionId: sub.id,
+            subscriptionUrl: sub.subscriptionUrl,
           },
         },
       });
 
-      await this.recordAdminActionTx(tx, actorId, "approved", updated.id);
-      return updated;
+      await this.recordAdminActionTx(tx, actorId, "approved", row.id);
+      return { updated: row, subscription: sub };
+    });
+
+    if (this.sideEffects.onOrderResolved) {
+      const reviewerName = await this.lookupReviewerName(actorId);
+      void Promise.resolve(
+        this.sideEffects.onOrderResolved(
+          updated,
+          { status: "approved", reviewerName },
+          subscription,
+        ),
+      ).catch(() => {
+        /* hook owner logs */
+      });
+    }
+
+    return updated;
+  }
+
+  private async lookupReviewerName(actorId: string): Promise<string> {
+    const actor = await this.prisma.user.findUnique({
+      where: { id: actorId },
+      select: { username: true, firstName: true },
+    });
+    if (!actor) return "system";
+    return actor.username ? `@${actor.username}` : actor.firstName;
+  }
+
+  /**
+   * User-initiated cancel: only allowed while the order is still actionable
+   * (`pending` / `processing`). Transitions to `cancelled` with the canned
+   * `cancelledByCustomer` note key and fires the same resolved-hook the
+   * admin flow uses, so the Telegram moderation card is also cleared.
+   */
+  async cancelByUser(orderId: string, userId: string) {
+    const order = await this.repo.findById(orderId);
+    if (!order) throw new NotFoundError("Order", orderId);
+    if (order.userId !== userId) throw new ForbiddenError();
+    if (order.status !== "pending" && order.status !== "processing") {
+      throw new UnprocessableError(
+        `Cannot cancel an order in status "${order.status}"`,
+      );
+    }
+    return this.setStatus(orderId, userId, {
+      status: "cancelled",
+      noteKey: "cancelledByCustomer",
     });
   }
 
@@ -194,11 +297,18 @@ export class OrdersService {
     if (order.status !== "pending") {
       throw new UnprocessableError(`Order is not pending (current: ${order.status})`);
     }
-    return this.prisma.order.update({
+    const updated = await this.prisma.order.update({
       where: { id: orderId },
       data: { status: "processing" },
       include: { user: true, plan: true, country: true },
     });
+
+    if (this.sideEffects.onOrderProcessing) {
+      void Promise.resolve(this.sideEffects.onOrderProcessing(updated)).catch(() => {
+        /* hook owner logs */
+      });
+    }
+    return updated;
   }
 
   private async recordAdminActionTx(

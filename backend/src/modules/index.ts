@@ -7,6 +7,7 @@ import { paymentsRoutes } from "./requisites/requisites.routes.js";
 import { catalogRoutes } from "./catalog/catalog.routes.js";
 import { notificationsRoutes } from "./notifications/notifications.routes.js";
 import { adminRoutes } from "./admin/admin.routes.js";
+import { adminReceiptsRoutes, receiptsRoutes } from "./receipts/receipts.routes.js";
 
 /**
  * Registers all feature modules under the supplied prefix. Each module
@@ -18,11 +19,13 @@ export async function registerModules(app: FastifyInstance, opts: { prefix: stri
       await scoped.register(authRoutes);
       await scoped.register(usersRoutes);
       await scoped.register(ordersRoutes);
+      await scoped.register(receiptsRoutes);
       await scoped.register(subscriptionsRoutes);
       await scoped.register(paymentsRoutes);
       await scoped.register(catalogRoutes);
       await scoped.register(notificationsRoutes);
       await scoped.register(adminRoutes);
+      await scoped.register(adminReceiptsRoutes);
     },
     { prefix: opts.prefix },
   );

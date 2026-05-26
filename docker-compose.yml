@@ -60,6 +60,19 @@ services:
       MARZBAN_API_URL: ${MARZBAN_API_URL:-}
       MARZBAN_API_USERNAME: ${MARZBAN_API_USERNAME:-}
       MARZBAN_API_PASSWORD: ${MARZBAN_API_PASSWORD:-}
+      # ── Telegram bot / moderation ──
+      TELEGRAM_BOT_MODE: ${TELEGRAM_BOT_MODE:-disabled}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
+      TELEGRAM_MODERATION_CHAT_ID: ${TELEGRAM_MODERATION_CHAT_ID:-}
+      TELEGRAM_WEBHOOK_DOMAIN: ${TELEGRAM_WEBHOOK_DOMAIN:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      MINI_APP_URL: ${MINI_APP_URL:-https://t.me}
+      # ── Receipts storage (mapped to a Compose volume below) ──
+      RECEIPTS_STORAGE_DIR: /var/lib/alpinavpn/receipts
+      RECEIPTS_MAX_BYTES: ${RECEIPTS_MAX_BYTES:-8388608}
+    volumes:
+      # Persistent receipts — a container restart never loses payment proofs.
+      - receipts-data:/var/lib/alpinavpn/receipts
     command: sh -c "npx prisma migrate deploy && node dist/server.js"
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
@@ -132,6 +145,7 @@ services:
 
 volumes:
   postgres-data:
+  receipts-data:
   certbot-etc:
   certbot-www:
 
