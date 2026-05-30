@@ -8,52 +8,44 @@ const prisma = new PrismaClient();
  *
  * Run: `npm run db:seed`
  */
+const GB = 1024n * 1024n * 1024n;
+
 async function main() {
   const plans: Prisma.PlanCreateInput[] = [
     {
-      slug: "1m",
-      duration: "m1",
-      label: "1 Month",
-      priceUsd: "5.99",
-      monthlyEquivalent: "5.99",
-      maxDevices: 3,
-      features: ["3 devices", "All countries", "Reality + VLESS"],
+      slug: "starter",
+      tier: "starter",
+      label: "Starter",
+      priceUsd: "3.00",
+      durationDays: 30,
+      trafficLimit: 50n * GB,
+      maxDevices: 2,
+      features: ["50 GB / month", "2 devices", "All locations"],
       sortOrder: 1,
     },
     {
-      slug: "3m",
-      duration: "m3",
-      label: "3 Months",
-      priceUsd: "15.99",
-      monthlyEquivalent: "5.33",
-      savingsPercent: 11,
+      slug: "standard",
+      tier: "standard",
+      label: "Standard",
+      priceUsd: "5.00",
+      durationDays: 30,
+      trafficLimit: 150n * GB,
       maxDevices: 3,
-      features: ["3 devices", "All countries", "Priority support"],
+      badge: "popular",
+      features: ["150 GB / month", "3 devices", "Priority routing"],
       sortOrder: 2,
     },
     {
-      slug: "6m",
-      duration: "m6",
-      label: "6 Months",
-      priceUsd: "29.99",
-      monthlyEquivalent: "5.00",
-      savingsPercent: 17,
-      badge: "popular",
+      slug: "premium",
+      tier: "premium",
+      label: "Premium",
+      priceUsd: "10.00",
+      durationDays: 30,
+      trafficLimit: 500n * GB,
       maxDevices: 5,
-      features: ["5 devices", "All countries", "Priority support"],
-      sortOrder: 3,
-    },
-    {
-      slug: "12m",
-      duration: "m12",
-      label: "12 Months",
-      priceUsd: "49.99",
-      monthlyEquivalent: "4.17",
-      savingsPercent: 30,
       badge: "best-value",
-      maxDevices: 5,
-      features: ["5 devices", "All countries", "Priority support"],
-      sortOrder: 4,
+      features: ["500 GB / month", "5 devices", "Priority support"],
+      sortOrder: 3,
     },
   ];
 
@@ -102,19 +94,20 @@ async function main() {
     }
   }
 
-  // One disabled crypto requisite as an example. Operators add real ones via /admin/requisites.
+  // One active card requisite. Operators edit/replace it via /admin/requisites.
   const existing = await prisma.paymentRequisite.findFirst({
-    where: { label: "USDT TRC20 — sample" },
+    where: { title: "Visa · Alpina Bank" },
   });
   if (!existing) {
     await prisma.paymentRequisite.create({
       data: {
-        method: "crypto",
-        label: "USDT TRC20 — sample",
-        address: "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
-        currency: "USDT",
-        network: "TRC20",
-        active: false,
+        title: "Visa · Alpina Bank",
+        cardNumber: "4169 7388 1234 5678",
+        ownerName: "ALPINA VPN LLC",
+        bankName: "Alpina Bank",
+        instructions:
+          "Transfer the exact amount, then upload a screenshot of the receipt. Approval is usually within 10 minutes.",
+        active: true,
       },
     });
   }

@@ -43,7 +43,14 @@ export default function AdminOrdersPage() {
 
   const filtered = useMemo(() => {
     return orders
-      .filter((o) => tab === "all" || o.status === tab)
+      .filter((o) => {
+        if (tab === "all") return true;
+        // Successful approvals settle as `active` — surface them under the
+        // "approved" tab so the queue reflects fulfilled orders.
+        if (tab === "approved")
+          return o.status === "approved" || o.status === "active";
+        return o.status === tab;
+      })
       .filter((o) => {
         const s = q.trim().toLowerCase();
         if (!s) return true;
@@ -104,7 +111,11 @@ export default function AdminOrdersPage() {
       />
     ) : null;
 
-    if (o.status === "pending" || o.status === "processing") {
+    if (
+      o.status === "created" ||
+      o.status === "pending" ||
+      o.status === "processing"
+    ) {
       return (
         <div className="flex justify-end gap-2">
           {receiptBtn}

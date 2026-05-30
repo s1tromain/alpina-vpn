@@ -10,12 +10,14 @@ import {
   Lock,
   Sparkles,
 } from "lucide-react";
+import { Copy, Link2, Power } from "lucide-react";
 import { GlassCard } from "@/components/shared/glass-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useUserStore } from "@/stores/user-store";
 import { useTranslations, format } from "@/hooks/use-translations";
 import { useFormatters } from "@/hooks/use-formatters";
+import { useCopy } from "@/hooks/use-copy";
 import { formatBytes } from "@/lib/utils";
 import type { Subscription } from "@/types";
 
@@ -49,6 +51,7 @@ export function SubscriptionDashboard() {
 function ActiveCard({ subscription }: { subscription: Subscription }) {
   const t = useTranslations();
   const { formatDate, daysUntil } = useFormatters();
+  const { copy } = useCopy();
 
   const localizedCountry =
     (t.countries as Record<string, string>)[subscription.country.code] ??
@@ -59,7 +62,7 @@ function ActiveCard({ subscription }: { subscription: Subscription }) {
     : null;
 
   const planLabel =
-    (t.plans as Record<string, string>)[subscription.plan.duration] ??
+    (t.plans as Record<string, string>)[subscription.plan.tier] ??
     subscription.plan.label;
 
   const trafficLabel =
@@ -175,6 +178,37 @@ function ActiveCard({ subscription }: { subscription: Subscription }) {
           <span className="text-muted-foreground"> / {subscription.maxDevices}</span>
         </p>
       </div>
+
+      {/* Subscription URL */}
+      <div className="mt-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] px-4 py-3">
+        <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+          <Link2 className="h-3.5 w-3.5" />
+          {t.dashboard.subscriptionUrl}
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <p className="min-w-0 flex-1 truncate font-mono text-[11px] text-silver-light">
+            {subscription.subscriptionUrl}
+          </p>
+          <Button
+            variant="secondary"
+            size="icon"
+            onClick={() =>
+              copy(subscription.subscriptionUrl, t.dashboard.urlCopied)
+            }
+            aria-label={t.dashboard.copyUrl}
+          >
+            <Copy className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Connect */}
+      <Button asChild size="lg" className="mt-4 w-full">
+        <Link href="/vpn">
+          <Power className="h-4 w-4" />
+          {t.dashboard.connect}
+        </Link>
+      </Button>
     </GlassCard>
   );
 }

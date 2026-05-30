@@ -1,7 +1,16 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { Plus, Trash2, CreditCard, Wallet, Power, Loader2 } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
+import {
+  Plus,
+  Trash2,
+  CreditCard,
+  Power,
+  Loader2,
+  Pencil,
+  ImageUp,
+} from "lucide-react";
+import Image from "next/image";
 import { toast } from "sonner";
 import { AdminTopbar } from "@/components/admin/admin-topbar";
 import { GlassCard } from "@/components/shared/glass-card";
@@ -17,54 +26,95 @@ import {
   DialogDescription,
   DialogClose,
 } from "@/components/ui/dialog";
-import { truncateMiddle } from "@/lib/utils";
+import { maskCard } from "@/lib/utils";
 import { api, ApiError } from "@/lib/api";
 import { useTranslations, format } from "@/hooks/use-translations";
 import { useAuthedEffect } from "@/hooks/use-authed-effect";
 import type { PaymentRequisite } from "@/types";
 
+interface Draft {
+  title: string;
+  cardNumber: string;
+  ownerName: string;
+  bankName: string;
+  qrImage: string;
+  instructions: string;
+}
+
+const EMPTY_DRAFT: Draft = {
+  title: "",
+  cardNumber: "",
+  ownerName: "",
+  bankName: "",
+  qrImage: "",
+  instructions: "",
+};
+
 /**
- * Admin → Payment requisites.
+ * Admin → Payment requisites (cards).
  *
- * Backed by /api/admin/requisites/* on the Fastify backend. Mutations are
- * optimistic: the UI updates synchronously, then either confirms with the
- * server response or rolls back + toasts on failure. Activate / deactivate
- * uses PATCH (preserves history); the trash icon issues a soft DELETE
- * that the backend refuses while open orders reference the requisite.
+ * Backed by /api/admin/requisites/* on the Fastify backend. The single active
+ * requisite is the card shown to users at checkout. Toggle uses PATCH (keeps
+ * history); the trash icon soft-deletes (refused while open orders reference
+ * it). QR images are stored as a URL or a client-converted data URL.
  */
 export default function AdminRequisitesPage() {
   const t = useTranslations();
+  const d = t.admin.requisites.dialog;
   const [items, setItems] = useState<PaymentRequisite[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [draft, setDraft] = useState({
-    label: "",
-    address: "",
-    currency: "USDT",
-    network: "TRC-20",
-    method: "crypto" as PaymentRequisite["method"],
-  });
+  const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  const qrInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     try {
       const list = await api.admin.requisites.list();
       setItems(list);
     } catch (err) {
-      toast.error(
-        err instanceof ApiError ? err.message : t.admin.requisites.toastValidation,
-      );
+      toast.error(err instanceof ApiError ? err.message : t.errors.loadFailed);
     } finally {
       setLoading(false);
     }
-  }, [t.admin.requisites.toastValidation]);
+  }, [t.errors.loadFailed]);
 
-  // `useAuthedEffect` waits for `useUserStore.hydrate()` to finish (JWT
-  // available) before firing — without this, the fetch can race ahead of
-  // the auth handshake and return 401.
   useAuthedEffect(() => {
     void refresh();
   }, [refresh]);
+
+  function openCreate() {
+    setEditingId(null);
+    setDraft(EMPTY_DRAFT);
+    setOpen(true);
+  }
+
+  function openEdit(r: PaymentRequisite) {
+    setEditingId(r.id);
+    setDraft({
+      title: r.title,
+      cardNumber: r.cardNumber,
+      ownerName: r.ownerName,
+      bankName: r.bankName,
+      qrImage: r.qrImage ?? "",
+      instructions: r.instructions ?? "",
+    });
+    setOpen(true);
+  }
+
+  async function onQrFile(file: File | null) {
+    if (!file) return;
+    if (file.size > 1_000_000) {
+      toast.error("QR image must be under 1 MB");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () =>
+      setDraft((prev) => ({ ...prev, qrImage: String(reader.result) }));
+    reader.readAsDataURL(file);
+  }
 
   async function toggle(id: string) {
     const before = items;
@@ -80,7 +130,7 @@ export default function AdminRequisitesPage() {
       });
       setItems((prev) => prev.map((r) => (r.id === id ? updated : r)));
     } catch (err) {
-      setItems(before); // rollback
+      setItems(before);
       toast.error(err instanceof ApiError ? err.message : t.errors.updateFailed);
     } finally {
       setBusyId(null);
@@ -95,41 +145,49 @@ export default function AdminRequisitesPage() {
       await api.admin.requisites.remove(id);
       toast.success(t.admin.requisites.toastRemoved);
     } catch (err) {
-      setItems(before); // rollback
+      setItems(before);
       toast.error(err instanceof ApiError ? err.message : t.errors.deleteFailed);
     } finally {
       setBusyId(null);
     }
   }
 
-  async function add() {
-    if (!draft.label || !draft.address) {
+  async function save() {
+    if (!draft.title || !draft.cardNumber || !draft.ownerName || !draft.bankName) {
       toast.error(t.admin.requisites.toastValidation);
       return;
     }
-    setCreating(true);
+    setSaving(true);
+    const payload = {
+      title: draft.title,
+      cardNumber: draft.cardNumber,
+      ownerName: draft.ownerName,
+      bankName: draft.bankName,
+      qrImage: draft.qrImage || null,
+      instructions: draft.instructions || null,
+    };
     try {
-      const created = await api.admin.requisites.create({
-        method: draft.method,
-        label: draft.label,
-        address: draft.address,
-        currency: draft.currency,
-        network: draft.network || undefined,
-        active: true,
-      });
-      setItems((prev) => [created, ...prev]);
-      setDraft({
-        label: "",
-        address: "",
-        currency: "USDT",
-        network: "TRC-20",
-        method: "crypto",
-      });
-      toast.success(t.admin.requisites.toastAdded);
+      if (editingId) {
+        const updated = await api.admin.requisites.update(editingId, payload);
+        setItems((prev) => prev.map((r) => (r.id === editingId ? updated : r)));
+        toast.success(t.admin.requisites.toastSaved);
+      } else {
+        const created = await api.admin.requisites.create({
+          ...payload,
+          qrImage: draft.qrImage || undefined,
+          instructions: draft.instructions || undefined,
+          active: true,
+        });
+        setItems((prev) => [created, ...prev]);
+        toast.success(t.admin.requisites.toastAdded);
+      }
+      setOpen(false);
+      setDraft(EMPTY_DRAFT);
+      setEditingId(null);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : t.errors.createFailed);
     } finally {
-      setCreating(false);
+      setSaving(false);
     }
   }
 
@@ -151,80 +209,10 @@ export default function AdminRequisitesPage() {
               disabled: disabledCount,
             })}
           </p>
-
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button disabled={creating}>
-                {creating ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Plus className="h-4 w-4" />
-                )}
-                {t.admin.requisites.add}
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>{t.admin.requisites.dialog.title}</DialogTitle>
-                <DialogDescription>
-                  {t.admin.requisites.dialog.description}
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="space-y-3">
-                <Field label={t.admin.requisites.dialog.label}>
-                  <Input
-                    placeholder={t.admin.requisites.dialog.labelPlaceholder}
-                    value={draft.label}
-                    onChange={(e) =>
-                      setDraft((d) => ({ ...d, label: e.target.value }))
-                    }
-                  />
-                </Field>
-                <Field label={t.admin.requisites.dialog.address}>
-                  <Input
-                    placeholder={t.admin.requisites.dialog.addressPlaceholder}
-                    value={draft.address}
-                    onChange={(e) =>
-                      setDraft((d) => ({ ...d, address: e.target.value }))
-                    }
-                  />
-                </Field>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label={t.admin.requisites.dialog.currency}>
-                    <Input
-                      value={draft.currency}
-                      onChange={(e) =>
-                        setDraft((d) => ({
-                          ...d,
-                          currency: e.target.value.toUpperCase(),
-                        }))
-                      }
-                    />
-                  </Field>
-                  <Field label={t.admin.requisites.dialog.network}>
-                    <Input
-                      value={draft.network}
-                      onChange={(e) =>
-                        setDraft((d) => ({ ...d, network: e.target.value }))
-                      }
-                    />
-                  </Field>
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <DialogClose asChild>
-                  <Button variant="secondary">{t.common.cancel}</Button>
-                </DialogClose>
-                <DialogClose asChild>
-                  <Button onClick={add} disabled={creating}>
-                    {t.common.create}
-                  </Button>
-                </DialogClose>
-              </div>
-            </DialogContent>
-          </Dialog>
+          <Button onClick={openCreate}>
+            <Plus className="h-4 w-4" />
+            {t.admin.requisites.add}
+          </Button>
         </div>
 
         {loading && items.length === 0 ? (
@@ -234,20 +222,18 @@ export default function AdminRequisitesPage() {
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {items.map((r) => {
-              const Icon = r.method === "card" ? CreditCard : Wallet;
               const isBusy = busyId === r.id;
               return (
                 <GlassCard key={r.id} className="p-5">
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-3">
                       <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-silver-light">
-                        <Icon className="h-4 w-4" />
+                        <CreditCard className="h-4 w-4" />
                       </div>
                       <div>
-                        <p className="text-sm font-medium">{r.label}</p>
+                        <p className="text-sm font-medium">{r.title}</p>
                         <p className="text-[11px] text-muted-foreground">
-                          {r.currency}
-                          {r.network ? ` · ${r.network}` : ""}
+                          {r.bankName} · {r.ownerName}
                         </p>
                       </div>
                     </div>
@@ -256,13 +242,36 @@ export default function AdminRequisitesPage() {
                     </Badge>
                   </div>
 
-                  <div className="mt-4 rounded-2xl border border-white/10 bg-graphite-950/40 px-3 py-2.5">
-                    <p className="break-all font-mono text-[11px] text-silver-light">
-                      {truncateMiddle(r.address, 12, 8)}
-                    </p>
+                  <div className="mt-4 flex items-center gap-3">
+                    <div className="flex-1 rounded-2xl border border-white/10 bg-graphite-950/40 px-3 py-2.5">
+                      <p className="font-mono text-[13px] tracking-wide text-silver-light">
+                        {maskCard(r.cardNumber)}
+                      </p>
+                    </div>
+                    {r.qrImage && (
+                      <div className="overflow-hidden rounded-xl border border-white/10 bg-white p-1">
+                        <Image
+                          src={r.qrImage}
+                          alt="QR"
+                          width={44}
+                          height={44}
+                          unoptimized
+                          className="h-11 w-11 object-contain"
+                        />
+                      </div>
+                    )}
                   </div>
 
                   <div className="mt-4 flex items-center justify-end gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => openEdit(r)}
+                      disabled={isBusy}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      {t.common.edit}
+                    </Button>
                     <Button
                       variant="secondary"
                       size="sm"
@@ -284,7 +293,6 @@ export default function AdminRequisitesPage() {
                       className="text-red-300 hover:text-red-200"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
-                      {t.common.remove}
                     </Button>
                   </div>
                 </GlassCard>
@@ -293,6 +301,113 @@ export default function AdminRequisitesPage() {
           </div>
         )}
       </div>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingId ? d.editTitle : d.title}</DialogTitle>
+            <DialogDescription>{d.description}</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <Field label={d.cardTitle}>
+              <Input
+                placeholder={d.cardTitlePlaceholder}
+                value={draft.title}
+                onChange={(e) => setDraft((s) => ({ ...s, title: e.target.value }))}
+              />
+            </Field>
+            <Field label={d.cardNumber}>
+              <Input
+                placeholder={d.cardNumberPlaceholder}
+                value={draft.cardNumber}
+                onChange={(e) =>
+                  setDraft((s) => ({ ...s, cardNumber: e.target.value }))
+                }
+              />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label={d.ownerName}>
+                <Input
+                  placeholder={d.ownerNamePlaceholder}
+                  value={draft.ownerName}
+                  onChange={(e) =>
+                    setDraft((s) => ({ ...s, ownerName: e.target.value }))
+                  }
+                />
+              </Field>
+              <Field label={d.bankName}>
+                <Input
+                  placeholder={d.bankNamePlaceholder}
+                  value={draft.bankName}
+                  onChange={(e) =>
+                    setDraft((s) => ({ ...s, bankName: e.target.value }))
+                  }
+                />
+              </Field>
+            </div>
+            <Field label={d.qrImage}>
+              <div className="flex items-center gap-2">
+                <Input
+                  placeholder={d.qrImagePlaceholder}
+                  value={draft.qrImage.startsWith("data:") ? "" : draft.qrImage}
+                  onChange={(e) =>
+                    setDraft((s) => ({ ...s, qrImage: e.target.value }))
+                  }
+                />
+                <input
+                  ref={qrInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => void onQrFile(e.target.files?.[0] ?? null)}
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="icon"
+                  onClick={() => qrInputRef.current?.click()}
+                  aria-label={d.qrUpload}
+                >
+                  <ImageUp className="h-4 w-4" />
+                </Button>
+              </div>
+              {draft.qrImage && (
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  {draft.qrImage.startsWith("data:")
+                    ? "Image attached"
+                    : draft.qrImage}
+                </p>
+              )}
+            </Field>
+            <Field label={d.instructions}>
+              <textarea
+                rows={3}
+                placeholder={d.instructionsPlaceholder}
+                value={draft.instructions}
+                onChange={(e) =>
+                  setDraft((s) => ({ ...s, instructions: e.target.value }))
+                }
+                className="w-full rounded-xl border border-white/10 bg-graphite-950/40 px-3 py-2 text-sm outline-none focus:border-white/20"
+              />
+            </Field>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <DialogClose asChild>
+              <Button variant="secondary" disabled={saving}>
+                {t.common.cancel}
+              </Button>
+            </DialogClose>
+            <Button onClick={save} disabled={saving}>
+              {saving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : null}
+              {t.common.save}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

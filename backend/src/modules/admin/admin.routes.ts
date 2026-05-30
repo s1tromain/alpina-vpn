@@ -4,6 +4,12 @@ import { OrdersService } from "../orders/orders.service.js";
 import { buildOrdersSideEffects } from "../orders/orders.side-effects.js";
 import { UsersService } from "../users/users.service.js";
 import { RequisitesService } from "../requisites/requisites.service.js";
+import { PlansService } from "../plans/plans.service.js";
+import {
+  createPlanSchema,
+  planIdSchema,
+  updatePlanSchema,
+} from "../plans/plans.dto.js";
 import {
   listOrdersQuerySchema,
   orderIdParamsSchema,
@@ -26,6 +32,7 @@ import {
 } from "../../utils/zod.js";
 import {
   toOrderDto,
+  toPlanDto,
   toRequisiteDto,
   toUserDto,
 } from "../users/users.mapper.js";
@@ -39,6 +46,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   const orders = new OrdersService(app.prisma, buildOrdersSideEffects(app));
   const users = new UsersService(app.prisma);
   const requisites = new RequisitesService(app.prisma);
+  const plans = new PlansService(app.prisma);
 
   app.addHook("preHandler", app.authenticate);
   app.addHook("preHandler", app.requireRole("admin", "operator"));
@@ -74,6 +82,34 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       const { role } = validateBody(req, setUserRoleSchema);
       const updated = await admin.setUserRole(req.user!.id, id, role);
       return { id: updated.id, role: updated.role };
+    },
+  );
+
+  // ── Plans ───────────────────────────────────────────────────────────────
+  app.get("/admin/plans", async () => {
+    const list = await plans.listAll();
+    return list.map(toPlanDto);
+  });
+
+  app.post(
+    "/admin/plans",
+    { preHandler: app.requireRole("admin") },
+    async (req, reply) => {
+      const dto = validateBody(req, createPlanSchema);
+      const created = await plans.create(dto);
+      reply.code(201);
+      return toPlanDto(created);
+    },
+  );
+
+  app.patch(
+    "/admin/plans/:id",
+    { preHandler: app.requireRole("admin") },
+    async (req) => {
+      const { id } = validateParams(req, planIdSchema);
+      const dto = validateBody(req, updatePlanSchema);
+      const updated = await plans.update(id, dto);
+      return toPlanDto(updated);
     },
   );
 

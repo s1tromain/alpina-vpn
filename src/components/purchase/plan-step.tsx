@@ -1,9 +1,9 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Check, Smartphone, Infinity as InfinityIcon } from "lucide-react";
+import { Check, Smartphone, CalendarDays, Database } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { cn, formatCurrency } from "@/lib/utils";
+import { cn, formatCurrency, formatBytes } from "@/lib/utils";
 import { haptic } from "@/lib/telegram";
 import { useTranslations, format } from "@/hooks/use-translations";
 import type { Plan } from "@/types";
@@ -21,10 +21,14 @@ export function PlanStep({ plans, value, onChange }: Props) {
       {plans.map((p) => {
         const active = p.id === value;
         const planLabel =
-          (t.plans as Record<string, string>)[p.duration] ?? p.label;
+          (t.plans as Record<string, string>)[p.tier] ?? p.label;
         const badgeLabel = p.badge
           ? (t.planBadges as Record<string, string>)[p.badge] ?? p.badge
           : null;
+        const trafficLabel =
+          p.trafficLimit == null
+            ? t.common.unlimitedTraffic
+            : formatBytes(p.trafficLimit);
         return (
           <motion.button
             key={p.id}
@@ -47,28 +51,24 @@ export function PlanStep({ plans, value, onChange }: Props) {
                 </p>
                 {badgeLabel && (
                   <Badge
-                    variant={p.badge === "Best value" ? "premium" : "outline"}
+                    variant={p.badge === "best-value" ? "premium" : "outline"}
                   >
                     {badgeLabel}
                   </Badge>
                 )}
               </div>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                {format(t.purchase.perMonth, {
-                  amount: formatCurrency(p.monthlyEquivalent),
-                })}
-                {p.savingsPercent
-                  ? ` · ${format(t.purchase.saveN, { n: p.savingsPercent })}`
-                  : ""}
-              </p>
 
-              <div className="mt-2.5 flex items-center gap-3 text-[10px] text-muted-foreground">
+              <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+                <span className="inline-flex items-center gap-1">
+                  <Database className="h-3 w-3" /> {trafficLabel}
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <CalendarDays className="h-3 w-3" />{" "}
+                  {format(t.purchase.daysN, { n: p.durationDays })}
+                </span>
                 <span className="inline-flex items-center gap-1">
                   <Smartphone className="h-3 w-3" />{" "}
                   {format(t.purchase.devicesN, { n: p.maxDevices })}
-                </span>
-                <span className="inline-flex items-center gap-1">
-                  <InfinityIcon className="h-3 w-3" /> {t.common.unlimitedTraffic}
                 </span>
               </div>
             </div>

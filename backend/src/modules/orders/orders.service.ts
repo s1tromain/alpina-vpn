@@ -8,6 +8,7 @@ import {
 } from "../../lib/errors.js";
 import { OrdersRepository } from "./orders.repository.js";
 import { SubscriptionsService } from "../subscriptions/subscriptions.service.js";
+import { env } from "../../config/env.js";
 import type { CreateOrderDto, UpdateOrderStatusDto } from "./orders.dto.js";
 import type { OrderWithRelations } from "../users/users.mapper.js";
 
@@ -19,7 +20,6 @@ import type { OrderWithRelations } from "../users/users.mapper.js";
  */
 export interface OrdersSideEffects {
   onOrderCreated?: (order: OrderWithRelations) => Promise<void> | void;
-  onOrderProcessing?: (order: OrderWithRelations) => Promise<void> | void;
   onOrderResolved?: (
     order: OrderWithRelations,
     decision: { status: "approved" | "rejected" | "cancelled" | "expired"; reviewerName?: string; reasonLabel?: string },
@@ -27,8 +27,11 @@ export interface OrdersSideEffects {
   ) => Promise<void> | void;
 }
 
+// `approved` is intentionally NOT terminal: it's the brief window between a
+// moderator's decision and successful provisioning. If provisioning fails the
+// order stays `approved` so it can be retried; on success it flips to `active`.
 const TERMINAL_STATUSES: OrderStatus[] = [
-  "approved",
+  "active",
   "rejected",
   "expired",
   "cancelled",
@@ -73,26 +76,40 @@ export class OrdersService {
   }
 
   async create(userId: string, dto: CreateOrderDto) {
-    const [plan, country, requisite] = await Promise.all([
-      this.prisma.plan.findUnique({ where: { id: dto.planId } }),
-      this.prisma.country.findUnique({ where: { code: dto.countryCode } }),
-      this.prisma.paymentRequisite.findUnique({ where: { id: dto.requisiteId } }),
-    ]);
-
+    const plan = await this.prisma.plan.findUnique({ where: { id: dto.planId } });
     if (!plan || !plan.active) throw new ValidationError("Unknown or inactive plan");
-    if (!country || !country.active)
-      throw new ValidationError("Unknown or inactive country");
-    if (!requisite || !requisite.active || requisite.deletedAt)
-      throw new ValidationError("Unknown or inactive payment requisite");
 
-    // Reject a fresh order if the user already has a pending one — prevents
-    // accidental double-clicks producing duplicate moderation queue items.
-    const existingPending = await this.prisma.order.findFirst({
-      where: { userId, status: { in: ["pending", "processing"] } },
+    // Region: the checkout no longer asks, so pin to the configured default
+    // (falling back to any active country if the configured code is missing).
+    const country =
+      (await this.prisma.country.findFirst({
+        where: { code: env.DEFAULT_REGION_CODE, active: true },
+      })) ??
+      (await this.prisma.country.findFirst({
+        where: { active: true },
+        orderBy: { code: "asc" },
+      }));
+    if (!country) {
+      throw new UnprocessableError("No active region is configured");
+    }
+
+    // Payment card: the single active requisite is chosen automatically.
+    const requisite = await this.prisma.paymentRequisite.findFirst({
+      where: { active: true, deletedAt: null },
+      orderBy: { createdAt: "asc" },
     });
-    if (existingPending) {
-      throw new ConflictError("You already have an open order awaiting review", {
-        orderId: existingPending.id,
+    if (!requisite) {
+      throw new UnprocessableError("No active payment method is configured");
+    }
+
+    // Reject a fresh order if the user already has an open one — prevents
+    // accidental double-clicks producing duplicate moderation queue items.
+    const existingOpen = await this.prisma.order.findFirst({
+      where: { userId, status: { in: ["created", "pending"] } },
+    });
+    if (existingOpen) {
+      throw new ConflictError("You already have an open order", {
+        orderId: existingOpen.id,
       });
     }
 
@@ -103,7 +120,7 @@ export class OrdersService {
       requisite: { connect: { id: requisite.id } },
       amount: plan.priceUsd,
       currency: "USD",
-      status: "pending",
+      status: "created",
       expiresAt: new Date(Date.now() + ORDER_TTL_HOURS * 60 * 60 * 1000),
     });
 
@@ -210,9 +227,13 @@ export class OrdersService {
     // — though note we cannot un-mint a real Marzban user; see README for
     // the at-least-once semantics caveat.
     const { updated, subscription } = await this.prisma.$transaction(async (tx) => {
+      // Provisioning happens inside the transaction. On success the order is
+      // recorded as `active` (not merely `approved`) so the lifecycle reflects
+      // a live subscription. A provider failure rolls the whole thing back,
+      // leaving the order untouched for a retry.
       const row = await tx.order.update({
         where: { id: orderId },
-        data: patch,
+        data: { ...patch, status: "active" },
         include: { user: true, plan: true, country: true },
       });
 
@@ -278,7 +299,7 @@ export class OrdersService {
     const order = await this.repo.findById(orderId);
     if (!order) throw new NotFoundError("Order", orderId);
     if (order.userId !== userId) throw new ForbiddenError();
-    if (order.status !== "pending" && order.status !== "processing") {
+    if (order.status !== "created" && order.status !== "pending") {
       throw new UnprocessableError(
         `Cannot cancel an order in status "${order.status}"`,
       );
@@ -287,28 +308,6 @@ export class OrdersService {
       status: "cancelled",
       noteKey: "cancelledByCustomer",
     });
-  }
-
-  /** Convenience helper used by the legacy “mark paid” call on the frontend. */
-  async markPaidByUser(orderId: string, userId: string) {
-    const order = await this.repo.findById(orderId);
-    if (!order) throw new NotFoundError("Order", orderId);
-    if (order.userId !== userId) throw new ForbiddenError();
-    if (order.status !== "pending") {
-      throw new UnprocessableError(`Order is not pending (current: ${order.status})`);
-    }
-    const updated = await this.prisma.order.update({
-      where: { id: orderId },
-      data: { status: "processing" },
-      include: { user: true, plan: true, country: true },
-    });
-
-    if (this.sideEffects.onOrderProcessing) {
-      void Promise.resolve(this.sideEffects.onOrderProcessing(updated)).catch(() => {
-        /* hook owner logs */
-      });
-    }
-    return updated;
   }
 
   private async recordAdminActionTx(

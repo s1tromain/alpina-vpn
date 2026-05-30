@@ -1,16 +1,18 @@
 export type UserRole = "admin" | "operator" | "user";
 
 export type OrderStatus =
+  | "created"
   | "pending"
   | "processing"
   | "approved"
+  | "active"
   | "rejected"
   | "expired"
   | "cancelled";
 
 export type SubscriptionStatus = "active" | "expired" | "paused" | "none";
 
-export type PlanDuration = "1m" | "3m" | "6m" | "12m";
+export type PlanTier = "starter" | "standard" | "premium";
 
 export type ServerStatus = "online" | "offline" | "maintenance";
 
@@ -65,16 +67,21 @@ export interface Subscription {
 
 export interface Plan {
   id: string;
-  duration: PlanDuration;
+  slug: string;
+  tier: PlanTier;
   label: string;
   priceUsd: number;
-  monthlyEquivalent: number;
+  /** subscription length in days */
+  durationDays: number;
   maxDevices: number;
-  /** bytes per month, null = unlimited */
+  /** bytes per period, null = unlimited */
   trafficLimit: number | null;
   badge?: string;
   savingsPercent?: number;
   features: string[];
+  /** present on admin lists; public catalogue omits it (all active) */
+  active?: boolean;
+  sortOrder?: number;
 }
 
 export interface Country {
@@ -104,11 +111,13 @@ export interface VPNServer {
 
 export interface PaymentRequisite {
   id: string;
-  method: "card" | "crypto" | "bank";
-  label: string;
-  address: string;
-  currency: string;
-  network?: string;
+  title: string;
+  cardNumber: string;
+  ownerName: string;
+  bankName: string;
+  /** absolute URL or data: URL */
+  qrImage?: string;
+  instructions?: string;
   active: boolean;
   /** for admin only */
   receivedTotalUsd?: number;

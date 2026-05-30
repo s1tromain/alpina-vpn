@@ -33,13 +33,6 @@ export const ordersRoutes: FastifyPluginAsync = async (app) => {
     return toOrderDto(order);
   });
 
-  /** POST /orders/:id/paid — user marks they have paid; transitions pending → processing. */
-  app.post("/orders/:id/paid", async (req) => {
-    const { id } = validateParams(req, orderIdParamsSchema);
-    const order = await orders.markPaidByUser(id, req.user!.id);
-    return toOrderDto(order);
-  });
-
   /**
    * POST /orders/:id/cancel — user cancels an order they no longer want to pay.
    * Only allowed while still pending/processing; closes out the moderation

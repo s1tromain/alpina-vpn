@@ -21,16 +21,6 @@ export function buildOrdersSideEffects(app: FastifyInstance): OrdersSideEffects 
       }
     },
 
-    onOrderProcessing: async (order) => {
-      try {
-        // No card re-post here — receipt-upload handles that. We just refresh
-        // the user via DM that we now know they paid.
-        await app.telegram.notifier.receiptReceivedDm(order.user.telegramId, order.id);
-      } catch (err) {
-        app.log.error({ err, orderId: order.id }, "orders_side_effect_processing_failed");
-      }
-    },
-
     onOrderResolved: async (order, decision, subscription) => {
       try {
         // Telegram bot callback paths edit the card themselves (the bot

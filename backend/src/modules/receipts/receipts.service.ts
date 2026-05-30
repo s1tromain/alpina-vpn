@@ -56,7 +56,7 @@ export class ReceiptsService {
     });
     if (!order) throw new NotFoundError("Order", args.orderId);
     if (order.userId !== args.userId) throw new ForbiddenError();
-    if (order.status !== "pending" && order.status !== "processing") {
+    if (order.status !== "created" && order.status !== "pending") {
       throw new UnprocessableError(
         `Cannot attach a receipt to an order in status "${order.status}"`,
       );
@@ -125,11 +125,11 @@ export class ReceiptsService {
         },
       });
 
-      // Bump the order into 'processing' (the user has now provided proof).
-      if (order.status === "pending") {
+      // Receipt provided → move the order into 'pending' moderation review.
+      if (order.status === "created") {
         await tx.order.update({
           where: { id: order.id },
-          data: { status: "processing" },
+          data: { status: "pending" },
         });
       }
 

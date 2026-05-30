@@ -204,12 +204,10 @@ export const api = {
   orders: {
     mine: () => request<Order[]>("/orders"),
     get: (id: string) => request<Order>(`/orders/${encodeURIComponent(id)}`),
-    create: (body: { planId: string; countryCode: string; requisiteId: string }) =>
+    // The backend pins region + payment card automatically; the user only
+    // chooses a plan. Creates the order in the `created` state.
+    create: (body: { planId: string }) =>
       request<Order>("/orders", { method: "POST", json: body }),
-    markPaid: (orderId: string) =>
-      request<Order>(`/orders/${encodeURIComponent(orderId)}/paid`, {
-        method: "POST",
-      }),
     cancel: (orderId: string) =>
       request<Order>(`/orders/${encodeURIComponent(orderId)}/cancel`, {
         method: "POST",
@@ -335,10 +333,12 @@ export const api = {
         id: string,
         body: Partial<{
           active: boolean;
-          label: string;
-          address: string;
-          currency: string;
-          network: string | null;
+          title: string;
+          cardNumber: string;
+          ownerName: string;
+          bankName: string;
+          qrImage: string | null;
+          instructions: string | null;
         }>,
       ) =>
         request<PaymentRequisite>(`/admin/requisites/${encodeURIComponent(id)}`, {
@@ -348,6 +348,44 @@ export const api = {
       remove: (id: string) =>
         request<void>(`/admin/requisites/${encodeURIComponent(id)}`, {
           method: "DELETE",
+        }),
+    },
+    plans: {
+      list: () => request<Plan[]>("/admin/plans"),
+      create: (body: {
+        slug: string;
+        tier: Plan["tier"];
+        label: string;
+        priceUsd: number;
+        durationDays: number;
+        trafficGb: number | null;
+        maxDevices: number;
+        features: string[];
+        badge?: string | null;
+        savingsPercent?: number | null;
+        active: boolean;
+        sortOrder: number;
+      }) => request<Plan>("/admin/plans", { method: "POST", json: body }),
+      update: (
+        id: string,
+        body: Partial<{
+          slug: string;
+          tier: Plan["tier"];
+          label: string;
+          priceUsd: number;
+          durationDays: number;
+          trafficGb: number | null;
+          maxDevices: number;
+          features: string[];
+          badge: string | null;
+          savingsPercent: number | null;
+          active: boolean;
+          sortOrder: number;
+        }>,
+      ) =>
+        request<Plan>(`/admin/plans/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          json: body,
         }),
     },
   },

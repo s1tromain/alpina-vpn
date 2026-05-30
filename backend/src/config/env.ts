@@ -44,10 +44,28 @@ const schema = z.object({
         .map((s) => BigInt(s)),
     ),
 
+  /// ISO-3166 alpha-2 of the region every new order/subscription is pinned
+  /// to now that the checkout no longer asks the user to pick a country.
+  /// Must reference a seeded, active Country (falls back to the first active
+  /// country at order-creation time if this code is missing).
+  DEFAULT_REGION_CODE: z
+    .string()
+    .length(2)
+    .toUpperCase()
+    .default("NL"),
+
   VPN_PROVIDER: z.enum(["mock", "marzban"]).default("mock"),
   MARZBAN_API_URL: z.string().url().optional(),
   MARZBAN_API_USERNAME: z.string().optional(),
   MARZBAN_API_PASSWORD: z.string().optional(),
+  /// Origin used to build absolute subscription URLs from Marzban's relative
+  /// `subscription_url`. Defaults to the MARZBAN_API_URL origin when unset.
+  MARZBAN_SUBSCRIPTION_BASE_URL: z.string().url().optional(),
+  /// JSON map of Marzban proxy protocols → settings, e.g. {"vless":{}}.
+  MARZBAN_PROXIES_JSON: z.string().default('{"vless":{}}'),
+  /// Optional JSON map of protocol → inbound tags, e.g. {"vless":["VLESS TCP REALITY"]}.
+  /// When omitted, Marzban assigns the user to every inbound of each proxy protocol.
+  MARZBAN_INBOUNDS_JSON: z.string().optional(),
 
   // ── Telegram bot / moderation ──────────────────────────────────────────────
   /// disabled = no bot started (useful for tests/CI/local Mini App work);

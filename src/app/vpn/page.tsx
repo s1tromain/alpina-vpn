@@ -154,7 +154,7 @@ export default function VpnPage() {
               {t.vpn.subscriptionEyebrow}
             </p>
             <p className="mt-1 font-serif text-lg">
-              {(t.plans as Record<string, string>)[subscription.plan.duration] ??
+              {(t.plans as Record<string, string>)[subscription.plan.tier] ??
                 subscription.plan.label}{" "}
               · {subscription.country.flag} {localizedCountry}
             </p>

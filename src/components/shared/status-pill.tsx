@@ -8,7 +8,9 @@ import {
   CalendarX,
   CheckCircle2,
   Clock,
+  FileClock,
   Loader2,
+  Wifi,
   XCircle,
 } from "lucide-react";
 
@@ -16,6 +18,10 @@ const styles: Record<
   OrderStatus,
   { cls: string; icon: typeof Clock; spin?: boolean }
 > = {
+  created: {
+    cls: "border-white/10 bg-white/[0.04] text-muted-foreground",
+    icon: FileClock,
+  },
   pending: {
     cls: "border-amber-400/20 bg-amber-400/[0.08] text-amber-300",
     icon: Clock,
@@ -28,6 +34,10 @@ const styles: Record<
   approved: {
     cls: "border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-300",
     icon: CheckCircle2,
+  },
+  active: {
+    cls: "border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-300",
+    icon: Wifi,
   },
   rejected: {
     cls: "border-red-400/20 bg-red-400/[0.08] text-red-300",

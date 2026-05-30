@@ -8,6 +8,7 @@ import {
   Receipt,
   Wallet,
   Server,
+  Package,
   Settings,
   LogOut,
 } from "lucide-react";
@@ -28,6 +29,7 @@ export function AdminSidebar() {
     },
     { href: "/admin/users", label: t.admin.sidebar.users, icon: Users },
     { href: "/admin/orders", label: t.admin.sidebar.orders, icon: Receipt },
+    { href: "/admin/plans", label: t.admin.sidebar.plans, icon: Package },
     { href: "/admin/servers", label: t.admin.sidebar.servers, icon: Server },
     {
       href: "/admin/requisites",

@@ -40,8 +40,16 @@ export default function OrdersPage() {
       )
       .filter((o) => {
         if (filter === "all") return true;
+        // "active" tab = open orders still moving through checkout/review.
         if (filter === "active")
-          return o.status === "pending" || o.status === "processing";
+          return (
+            o.status === "created" ||
+            o.status === "pending" ||
+            o.status === "processing"
+          );
+        // "approved" tab = successfully fulfilled orders (live subscription).
+        if (filter === "approved")
+          return o.status === "approved" || o.status === "active";
         if (filter === "rejected")
           return (
             o.status === "rejected" ||

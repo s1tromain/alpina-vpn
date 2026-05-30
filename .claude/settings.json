@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx eslint *)"
+      "Bash(npx eslint *)",
+      "Bash(cd /c/Users/johnc/Desktop/vpn/backend && cat package.json | grep -A30 '\"scripts\"')",
+      "Read(//c/c/Users/johnc/Desktop/vpn/backend/**)",
+      "Bash(cd /c/Users/johnc/Desktop/vpn && rm -f src/components/purchase/confirm-step.tsx src/components/purchase/country-step.tsx && echo \"deleted\")"
+    ],
+    "additionalDirectories": [
+      "c:\\c\\Users\\johnc\\Desktop\\vpn\\src\\components\\purchase"
     ]
   }
 }

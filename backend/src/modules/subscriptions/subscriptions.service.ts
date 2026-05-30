@@ -2,14 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { SubscriptionsRepository } from "./subscriptions.repository.js";
 import { getVpnProvider } from "../vpn/index.js";
 import { ConflictError, NotFoundError, UnprocessableError } from "../../lib/errors.js";
-import type { Order, Plan, Subscription, User } from "@prisma/client";
-
-const DURATION_DAYS: Record<Plan["duration"], number> = {
-  m1: 30,
-  m3: 90,
-  m6: 180,
-  m12: 365,
-};
+import type { Order, Plan, Subscription } from "@prisma/client";
 
 /**
  * Subscription lifecycle.
@@ -66,13 +59,12 @@ export class SubscriptionsService {
 
     const user = await tx.user.findUniqueOrThrow({ where: { id: order.userId } });
 
-    const durationDays = DURATION_DAYS[order.plan.duration];
     const result = await provider.provision({
       userId: user.id,
       telegramId: user.telegramId.toString(),
       planSlug: order.plan.slug,
       countryCode: order.countryCode,
-      durationDays,
+      durationDays: order.plan.durationDays,
       trafficLimitBytes: order.plan.trafficLimit ?? null,
       maxDevices: order.plan.maxDevices,
     });

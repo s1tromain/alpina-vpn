@@ -232,9 +232,11 @@ export class ModerationService {
       : esc(order.user.firstName);
     const amount = `${Number(order.amount).toFixed(2)} ${esc(order.currency)}`;
     const statusEmoji: Record<string, string> = {
+      created: "🆕",
       pending: "🟡",
       processing: "🟠",
       approved: "✅",
+      active: "🟢",
       rejected: "❌",
       expired: "⚪",
       cancelled: "⚫",

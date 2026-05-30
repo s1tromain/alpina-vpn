@@ -36,24 +36,26 @@ export class AdminService {
     ] = await this.prisma.$transaction([
       this.prisma.user.count(),
       this.prisma.subscription.count({ where: { status: "active" } }),
+      // Revenue & "approved" counts track orders that successfully became
+      // ACTIVE (a moderator approval that provisioned a live subscription).
       this.prisma.order.aggregate({
         where: {
-          status: "approved",
+          status: "active",
           reviewedAt: { gte: currentPeriodStart },
         },
         _sum: { amount: true },
       }),
       this.prisma.order.aggregate({
         where: {
-          status: "approved",
+          status: "active",
           reviewedAt: { gte: previousPeriodStart, lt: currentPeriodStart },
         },
         _sum: { amount: true },
       }),
-      this.prisma.order.count({ where: { status: "approved" } }),
+      this.prisma.order.count({ where: { status: "active" } }),
       this.prisma.order.count({ where: { status: "rejected" } }),
       this.prisma.order.count({
-        where: { status: { in: ["pending", "processing"] } },
+        where: { status: { in: ["created", "pending"] } },
       }),
       this.prisma.vpnServer.count({ where: { status: "online" } }),
       this.prisma.vpnServer.count(),

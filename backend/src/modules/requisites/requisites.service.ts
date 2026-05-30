@@ -26,11 +26,12 @@ export class RequisitesService {
 
   create(dto: CreateRequisiteDto) {
     return this.repo.create({
-      method: dto.method,
-      label: dto.label,
-      address: dto.address,
-      currency: dto.currency,
-      network: dto.network ?? null,
+      title: dto.title,
+      cardNumber: dto.cardNumber,
+      ownerName: dto.ownerName,
+      bankName: dto.bankName,
+      qrImage: dto.qrImage ?? null,
+      instructions: dto.instructions ?? null,
       active: dto.active,
     });
   }
@@ -81,7 +82,7 @@ export class RequisitesService {
       const openOrders = await tx.order.count({
         where: {
           paymentRequisiteId: id,
-          status: { in: ["pending", "processing"] },
+          status: { in: ["created", "pending"] },
         },
       });
       if (openOrders > 0) {

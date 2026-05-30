@@ -119,7 +119,7 @@ export default function ProfilePage() {
                     </p>
                     <p className="mt-1 font-serif text-lg">
                       {(t.plans as Record<string, string>)[
-                        subscription.plan.duration
+                        subscription.plan.tier
                       ] ?? subscription.plan.label}
                     </p>
                   </div>

@@ -30,15 +30,18 @@ export interface UserDto {
 
 export interface PlanDto {
   id: string;
-  duration: "1m" | "3m" | "6m" | "12m";
+  slug: string;
+  tier: "starter" | "standard" | "premium";
   label: string;
   priceUsd: number;
-  monthlyEquivalent: number;
+  durationDays: number;
   maxDevices: number;
   trafficLimit: number | null;
   badge?: string;
   savingsPercent?: number;
   features: string[];
+  active: boolean;
+  sortOrder: number;
 }
 
 export interface CountryDto {
@@ -77,9 +80,11 @@ export interface OrderDto {
   amount: number;
   currency: string;
   status:
+    | "created"
     | "pending"
     | "processing"
     | "approved"
+    | "active"
     | "rejected"
     | "expired"
     | "cancelled";
@@ -105,11 +110,12 @@ export interface OrderDto {
 
 export interface PaymentRequisiteDto {
   id: string;
-  method: "card" | "crypto" | "bank";
-  label: string;
-  address: string;
-  currency: string;
-  network?: string;
+  title: string;
+  cardNumber: string;
+  ownerName: string;
+  bankName: string;
+  qrImage?: string;
+  instructions?: string;
   active: boolean;
   receivedTotalUsd?: number;
 }
@@ -130,31 +136,21 @@ export interface VpnServerDto {
 
 // ───────────────────────── mappers ─────────────────────────
 
-function planDurationToSlug(d: Plan["duration"]): PlanDto["duration"] {
-  switch (d) {
-    case "m1":
-      return "1m";
-    case "m3":
-      return "3m";
-    case "m6":
-      return "6m";
-    case "m12":
-      return "12m";
-  }
-}
-
 export function toPlanDto(plan: Plan): PlanDto {
   return {
     id: plan.id,
-    duration: planDurationToSlug(plan.duration),
+    slug: plan.slug,
+    tier: plan.tier,
     label: plan.label,
     priceUsd: Number(plan.priceUsd),
-    monthlyEquivalent: Number(plan.monthlyEquivalent),
+    durationDays: plan.durationDays,
     maxDevices: plan.maxDevices,
     trafficLimit: plan.trafficLimit === null ? null : Number(plan.trafficLimit),
     badge: plan.badge ?? undefined,
     savingsPercent: plan.savingsPercent ?? undefined,
     features: plan.features,
+    active: plan.active,
+    sortOrder: plan.sortOrder,
   };
 }
 
@@ -276,11 +272,12 @@ export function toRequisiteDto(
 ): PaymentRequisiteDto {
   return {
     id: r.id,
-    method: r.method,
-    label: r.label,
-    address: r.address,
-    currency: r.currency,
-    network: r.network ?? undefined,
+    title: r.title,
+    cardNumber: r.cardNumber,
+    ownerName: r.ownerName,
+    bankName: r.bankName,
+    qrImage: r.qrImage ?? undefined,
+    instructions: r.instructions ?? undefined,
     active: r.active,
     ...(opts.includeTotals
       ? { receivedTotalUsd: Number(r.receivedTotalUsd) }

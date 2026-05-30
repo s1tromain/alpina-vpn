@@ -23,10 +23,20 @@ enum UserRole {
 }
 
 enum OrderStatus {
+  // Spec lifecycle: CREATED → PENDING → APPROVED → ACTIVE, with REJECTED /
+  // EXPIRED terminals and a user-initiated CANCELLED path.
+  //   created   — order placed, no receipt yet
+  //   pending   — receipt uploaded, awaiting moderation
+  //   approved  — moderator approved; provisioning in progress (retryable)
+  //   active    — Marzban provisioned + subscription live
+  // `processing` is retained only so the historical enum value keeps existing
+  // rows valid; the app no longer transitions orders into it.
+  created
   pending
   processing
   approved
   rejected
+  active
   expired
   cancelled
 }
@@ -43,11 +53,10 @@ enum ServerStatus {
   maintenance
 }
 
-enum PlanDuration {
-  m1  @map("1m")
-  m3  @map("3m")
-  m6  @map("6m")
-  m12 @map("12m")
+enum PlanTier {
+  starter
+  standard
+  premium
 }
 
 enum VpnProtocol {
@@ -122,14 +131,15 @@ model User {
 
 model Plan {
   id                String        @id @default(cuid())
-  // Stable slug used by the frontend (e.g. "1m", "3m", "6m", "12m")
+  // Stable slug used by the frontend (e.g. "starter", "standard", "premium")
   slug              String        @unique
-  duration          PlanDuration
+  tier              PlanTier
   label             String
   priceUsd          Decimal       @db.Decimal(12, 2)
-  monthlyEquivalent Decimal       @db.Decimal(12, 2)
+  /// Subscription length in days (all current tiers are 30).
+  durationDays      Int           @default(30)
   maxDevices        Int           @default(3)
-  /// bytes per month; null = unlimited
+  /// bytes per period; null = unlimited
   trafficLimit      BigInt?
   badge             String?
   savingsPercent    Int?
@@ -201,22 +211,26 @@ model VpnServer {
 // ──────────────────────────────────────────────────────────────────────────────
 
 model PaymentRequisite {
-  id        String          @id @default(cuid())
-  method    PaymentMethod
-  label     String
-  address   String
-  currency  String
-  network   String?
-  active    Boolean         @default(true)
+  id          String        @id @default(cuid())
+  /// Display title, e.g. "Visa · Kapital Bank"
+  title       String
+  cardNumber  String
+  ownerName   String
+  bankName    String
+  /// QR payload: an absolute URL or a data: URL. Optional.
+  qrImage     String?
+  /// Free-form payment instructions shown to the user at checkout.
+  instructions String?
+  active      Boolean       @default(true)
   /// Aggregate (cached) received total — recomputed on order approval
   receivedTotalUsd Decimal   @default(0) @db.Decimal(14, 2)
-  createdAt DateTime        @default(now())
-  updatedAt DateTime        @updatedAt
-  deletedAt DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  deletedAt   DateTime?
 
   orders Order[]
 
-  @@index([active, method])
+  @@index([active])
   @@map("payment_requisites")
 }
 

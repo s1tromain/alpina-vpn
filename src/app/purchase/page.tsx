@@ -11,146 +11,145 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Stepper } from "@/components/purchase/stepper";
 import { PlanStep } from "@/components/purchase/plan-step";
-import { CountryStep } from "@/components/purchase/country-step";
-import { RequisiteStep } from "@/components/purchase/requisite-step";
-import { ConfirmStep } from "@/components/purchase/confirm-step";
+import { PayStep } from "@/components/purchase/requisite-step";
 
 import { api, ApiError } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
 import { haptic } from "@/lib/telegram";
 import { useTranslations } from "@/hooks/use-translations";
+import type { Order } from "@/types";
 
 function PurchaseInner() {
   const t = useTranslations();
   const router = useRouter();
   const params = useSearchParams();
 
-  // Plans + countries are public; requisites require auth.
+  // Plans are public; the active payment card requires auth.
   const plansRes = useResource(() => api.plans.list(), { requiresAuth: false });
-  const countriesRes = useResource(() => api.countries.list(), {
-    requiresAuth: false,
-  });
   const requisitesRes = useResource(() => api.payments.requisites());
 
-  // Memoize so the `[]` fallback doesn't produce a fresh reference each
-  // render — would otherwise trip the exhaustive-deps check on the
-  // selection effects + memos below.
   const plans = useMemo(() => plansRes.data ?? [], [plansRes.data]);
-  const countries = useMemo(
-    () => countriesRes.data ?? [],
-    [countriesRes.data],
-  );
   const requisites = useMemo(
     () => requisitesRes.data ?? [],
     [requisitesRes.data],
   );
+  const requisite = useMemo(
+    () => requisites.find((r) => r.active) ?? requisites[0] ?? null,
+    [requisites],
+  );
 
   const STEPS = [
     { label: t.purchase.steps.plan },
-    { label: t.purchase.steps.country },
     { label: t.purchase.steps.payment },
-    { label: t.purchase.steps.confirm },
   ];
 
   const [step, setStep] = useState(0);
   const [planId, setPlanId] = useState<string>("");
-  const [countryCode, setCountryCode] = useState<string>("");
-  const [requisiteId, setRequisiteId] = useState<string>("");
+  const [order, setOrder] = useState<Order | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [creating, setCreating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // Seed the wizard once the catalogues have loaded. The ?plan=<id> query
-  // param wins if present; otherwise we pick a sensible default (3-month
-  // plan if available, else first plan).
+  // Seed the selected plan once plans load. ?plan=<id> wins; else default to
+  // the Standard tier if present, otherwise the first plan.
   useEffect(() => {
     if (planId || plans.length === 0) return;
     const requested = params.get("plan");
     const found = requested ? plans.find((p) => p.id === requested) : null;
-    const fallback = plans.find((p) => p.duration === "3m") ?? plans[0];
+    const fallback = plans.find((p) => p.tier === "standard") ?? plans[0];
     setPlanId(found?.id ?? fallback?.id ?? "");
   }, [planId, plans, params]);
-
-  useEffect(() => {
-    if (countryCode || countries.length === 0) return;
-    const preferred = countries.find((c) => !c.premium) ?? countries[0];
-    setCountryCode(preferred?.code ?? "");
-  }, [countryCode, countries]);
-
-  useEffect(() => {
-    if (requisiteId || requisites.length === 0) return;
-    const active = requisites.find((r) => r.active) ?? requisites[0];
-    setRequisiteId(active?.id ?? "");
-  }, [requisiteId, requisites]);
 
   const plan = useMemo(
     () => plans.find((p) => p.id === planId) ?? null,
     [plans, planId],
   );
-  const country = useMemo(
-    () => countries.find((c) => c.code === countryCode) ?? null,
-    [countries, countryCode],
-  );
-  const requisite = useMemo(
-    () => requisites.find((r) => r.id === requisiteId) ?? null,
-    [requisites, requisiteId],
-  );
 
-  const catalogueReady =
-    !!plan && !!country && !!requisite && plans.length > 0 &&
-    countries.length > 0 && requisites.length > 0;
+  const initialLoading =
+    (plansRes.loading && plans.length === 0) ||
+    (requisitesRes.loading && requisites.length === 0);
 
-  function next() {
-    haptic("light");
-    setStep((s) => Math.min(s + 1, STEPS.length - 1));
-  }
   function back() {
     haptic("light");
     setStep((s) => Math.max(s - 1, 0));
   }
 
-  async function submit() {
-    if (!planId || !countryCode || !requisiteId) return;
+  // Plan → Pay: create the order once (reuse if we already did), then advance.
+  async function goToPayment() {
+    if (!planId) return;
+    if (!requisite) {
+      toast.error(t.purchase.noActiveCard);
+      return;
+    }
+    if (order) {
+      setStep(1);
+      return;
+    }
+    setCreating(true);
+    haptic("medium");
+    try {
+      const created = await api.orders.create({ planId });
+      setOrder(created);
+      setStep(1);
+    } catch (err) {
+      // A pre-existing open order (409) carries its id — resume it.
+      if (err instanceof ApiError && err.status === 409) {
+        const existingId = (err.details as { orderId?: string } | undefined)
+          ?.orderId;
+        if (existingId) {
+          try {
+            const existing = await api.orders.get(existingId);
+            setOrder(existing);
+            setStep(1);
+            return;
+          } catch {
+            /* fall through to generic error */
+          }
+        }
+      }
+      haptic("error");
+      toast.error(err instanceof ApiError ? err.message : t.errors.createFailed);
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  // Pay step: upload the receipt → order becomes PENDING (awaiting moderation).
+  async function submitReceipt() {
+    if (!order) return;
+    if (!file) {
+      toast.error(t.purchase.receiptRequired);
+      return;
+    }
     setSubmitting(true);
     haptic("medium");
     try {
-      const order = await api.orders.create({
-        planId,
-        countryCode,
-        requisiteId,
-      });
-      // Tell the backend the user has marked it paid. The frontend's flow
-      // assumes "Submit" = "I have paid" — keep that contract.
-      try {
-        await api.orders.markPaid(order.id);
-      } catch {
-        // If markPaid fails, the order still exists as `pending`. The user
-        // will be able to retry from the orders page.
-      }
+      await api.orders.uploadReceipt(order.id, file);
       haptic("success");
-      toast.success(t.purchase.orderCreated, {
-        description: t.purchase.orderCreatedDesc,
+      toast.success(t.purchase.submitted, {
+        description: t.purchase.submittedDesc,
       });
       router.push("/orders");
     } catch (err) {
       haptic("error");
-      toast.error(
-        err instanceof ApiError ? err.message : t.errors.createFailed,
-      );
+      toast.error(err instanceof ApiError ? err.message : t.errors.createFailed);
     } finally {
       setSubmitting(false);
     }
   }
 
-  const ctaLabel =
-    step === STEPS.length - 1
-      ? submitting
-        ? t.purchase.submitting
-        : t.purchase.iPaid
-      : t.common.continue;
+  const onPlanStep = step === 0;
+  const ctaLabel = onPlanStep
+    ? creating
+      ? t.purchase.creatingOrder
+      : t.common.continue
+    : submitting
+      ? t.purchase.uploading
+      : t.purchase.submitReceipt;
 
-  const initialLoading =
-    (plansRes.loading && plans.length === 0) ||
-    (countriesRes.loading && countries.length === 0) ||
-    (requisitesRes.loading && requisites.length === 0);
+  const ctaDisabled = onPlanStep
+    ? creating || !planId || !plan
+    : submitting || !file;
 
   return (
     <AppShell>
@@ -159,7 +158,7 @@ function PurchaseInner() {
       <Stepper steps={STEPS} current={step} />
 
       <div className="relative mt-6 min-h-[460px]">
-        {initialLoading || !catalogueReady ? (
+        {initialLoading ? (
           <div className="flex items-center justify-center py-20 text-muted-foreground">
             <Loader2 className="h-5 w-5 animate-spin" />
           </div>
@@ -175,26 +174,13 @@ function PurchaseInner() {
               {step === 0 && (
                 <PlanStep plans={plans} value={planId} onChange={setPlanId} />
               )}
-              {step === 1 && (
-                <CountryStep
-                  countries={countries}
-                  value={countryCode}
-                  onChange={setCountryCode}
-                />
-              )}
-              {step === 2 && plan && (
-                <RequisiteStep
-                  requisites={requisites}
-                  value={requisiteId}
-                  onChange={setRequisiteId}
-                  amount={plan.priceUsd}
-                />
-              )}
-              {step === 3 && plan && country && requisite && (
-                <ConfirmStep
-                  plan={plan}
-                  country={country}
+              {step === 1 && plan && requisite && (
+                <PayStep
                   requisite={requisite}
+                  amount={plan.priceUsd}
+                  file={file}
+                  onFileChange={setFile}
+                  uploading={submitting}
                 />
               )}
             </motion.div>
@@ -217,11 +203,11 @@ function PurchaseInner() {
         <Button
           size="lg"
           className="flex-1"
-          onClick={step === STEPS.length - 1 ? submit : next}
-          disabled={submitting || !catalogueReady}
+          onClick={onPlanStep ? goToPayment : submitReceipt}
+          disabled={ctaDisabled || initialLoading}
         >
           {ctaLabel}
-          {step !== STEPS.length - 1 && <ArrowRight className="h-4 w-4" />}
+          {onPlanStep && !creating && <ArrowRight className="h-4 w-4" />}
         </Button>
       </div>
     </AppShell>

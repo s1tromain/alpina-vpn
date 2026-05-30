@@ -45,6 +45,14 @@ export function truncateMiddle(str: string, head = 6, tail = 6) {
   return `${str.slice(0, head)}…${str.slice(-tail)}`;
 }
 
+/** Mask a card number to `•••• •••• •••• 1234`, preserving the last 4 digits. */
+export function maskCard(cardNumber: string) {
+  const digits = cardNumber.replace(/\D/g, "");
+  if (digits.length < 4) return cardNumber;
+  const last4 = digits.slice(-4);
+  return `•••• •••• •••• ${last4}`;
+}
+
 export function shortName(first: string, last?: string) {
   const f = first?.[0] ?? "";
   const l = last?.[0] ?? "";
