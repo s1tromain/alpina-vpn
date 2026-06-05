@@ -17,6 +17,7 @@ import {
 } from "../orders/orders.dto.js";
 import {
   adminListUsersQuerySchema,
+  setUserBanSchema,
   setUserRoleSchema,
   userIdParamsSchema,
 } from "./admin.dto.js";
@@ -82,6 +83,21 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       const { role } = validateBody(req, setUserRoleSchema);
       const updated = await admin.setUserRole(req.user!.id, id, role);
       return { id: updated.id, role: updated.role };
+    },
+  );
+
+  /**
+   * PATCH /admin/users/:id/ban — block / unblock a user.
+   * Body: `{ "banned": true, "reason"?: "…" }`.
+   */
+  app.patch(
+    "/admin/users/:id/ban",
+    { preHandler: app.requireRole("admin") },
+    async (req) => {
+      const { id } = validateParams(req, userIdParamsSchema);
+      const { banned, reason } = validateBody(req, setUserBanSchema);
+      const updated = await admin.setUserBan(req.user!.id, id, banned, reason);
+      return { id: updated.id, banned: updated.bannedAt !== null };
     },
   );
 

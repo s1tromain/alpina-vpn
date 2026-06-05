@@ -501,6 +501,12 @@ export const en: Dict = {
         registered: "Registered",
         lastSeen: "Last seen",
       },
+      blocked: "Blocked",
+      block: "Block",
+      unblock: "Unblock",
+      toastRoleChanged: "Role changed to {role}",
+      toastBlocked: "User blocked",
+      toastUnblocked: "User unblocked",
     },
     orders: {
       title: "Orders",

@@ -110,6 +110,10 @@ model User {
   isPremium     Boolean    @default(false)
   role          UserRole   @default(user)
 
+  /// Optional username/password login (web admin panel). Null = no password
+  /// login, account is Telegram-only. Stored as scrypt `salt:hash` (hex).
+  passwordHash  String?
+
   registeredAt  DateTime   @default(now())
   lastSeenAt    DateTime?
   bannedAt      DateTime?

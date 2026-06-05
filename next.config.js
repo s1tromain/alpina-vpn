@@ -32,7 +32,7 @@ const nextConfig = {
    *
    * `BACKEND_URL` overrides the proxy target — useful for staging.
    */
-  async rewrites() {
+  async rewrites() { 
     if (process.env.NEXT_PUBLIC_API_URL) {
       return { beforeFiles: [], afterFiles: [], fallback: [] };
     }

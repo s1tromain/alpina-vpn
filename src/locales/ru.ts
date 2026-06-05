@@ -499,6 +499,12 @@ export const ru = {
         registered: "Регистрация",
         lastSeen: "Был в сети",
       },
+      blocked: "Заблокирован",
+      block: "Заблокировать",
+      unblock: "Разблокировать",
+      toastRoleChanged: "Роль изменена: {role}",
+      toastBlocked: "Пользователь заблокирован",
+      toastUnblocked: "Пользователь разблокирован",
     },
     orders: {
       title: "Заказы",

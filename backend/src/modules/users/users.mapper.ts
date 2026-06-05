@@ -25,6 +25,8 @@ export interface UserDto {
   role: "user" | "operator" | "admin";
   registeredAt: string;
   lastSeenAt?: string;
+  banned: boolean;
+  banReason?: string;
   subscription: SubscriptionDto | null;
 }
 
@@ -207,6 +209,8 @@ export function toUserDto(user: UserWithSubscription): UserDto {
     role: user.role,
     registeredAt: user.registeredAt.toISOString(),
     lastSeenAt: user.lastSeenAt?.toISOString(),
+    banned: user.bannedAt !== null,
+    banReason: user.banReason ?? undefined,
     subscription: current ? toSubscriptionDto(current) : null,
   };
 }

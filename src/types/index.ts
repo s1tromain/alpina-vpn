@@ -44,6 +44,9 @@ export interface User {
   role: UserRole;
   registeredAt: string;
   lastSeenAt?: string;
+  /** Present on admin lists; true when the account is blocked. */
+  banned?: boolean;
+  banReason?: string;
   subscription: Subscription | null;
 }
 

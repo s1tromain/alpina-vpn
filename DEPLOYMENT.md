@@ -194,6 +194,29 @@ catalogue (plans, countries, sample servers):
 docker compose exec backend npx tsx prisma/seed.ts
 ```
 
+### Web admin panel (browser, outside Telegram)
+
+The admin console at `/admin` is reachable from a normal browser — no
+Telegram required. Log in at `/admin/login` with a username + password; the
+backend issues an HttpOnly JWT session cookie.
+
+> The cookie is `SameSite=Lax`, so the admin panel must be served **same-origin**
+> with the API. Leave `NEXT_PUBLIC_API_URL` unset and point `BACKEND_URL` at the
+> backend so Next.js proxies `/api/*` (see `next.config.js`). A cross-origin API
+> subdomain would require `SameSite=None; Secure` instead.
+
+Create the first administrator (Telegram ID `8366916766`, username `emdjoi`):
+
+```bash
+docker compose exec -e ADMIN_PASSWORD='<strong-password>' backend \
+  npx tsx scripts/create-admin.ts
+# or explicitly:
+docker compose exec backend \
+  npx tsx scripts/create-admin.ts --telegram-id 8366916766 --username emdjoi --password '<strong-password>'
+```
+
+The script is idempotent — re-run it to rotate the password.
+
 Hit the health endpoints:
 
 ```bash

@@ -1,52 +1,47 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 /**
- * Admin URL gate — *optional defence-in-depth*.
+ * Admin URL gate — *edge-level UX short-circuit*.
  *
  * The real authorization happens on the Fastify backend: every
- * /api/admin/* endpoint chains `app.authenticate` + `app.requireRole`,
- * so a non-admin who guesses the URL will simply get 401/403 toasts
- * across the page. This middleware adds an EARLIER short-circuit at the
- * edge so non-admins don't see the admin shell at all.
+ * /api/admin/* and /api/auth/admin/* endpoint chains `app.authenticate` +
+ * `app.requireRole`, and the client-side `AdminGuard` confirms the session
+ * via GET /auth/admin/me. This middleware only avoids flashing the admin
+ * shell to a visitor who has no session cookie at all.
  *
  * Behaviour:
  *
- *   - If `ADMIN_ALLOWED_TELEGRAM_IDS` is unset/empty, the gate is open
- *     (regardless of NODE_ENV). The backend still enforces — and most
- *     deployments will leave this unset and rely entirely on the
- *     backend's JWT-based role check.
+ *   - /admin/login is always reachable (it's where we send unauthenticated
+ *     visitors, so it must never redirect to itself).
  *
- *   - If the allowlist IS set, only requests carrying a matching
- *     `x-telegram-id` header or `tg_id` cookie pass through. These are
- *     issued by an upstream proxy that has already verified initData
- *     server-side (not shipped in the open-source code).
+ *   - Any other /admin/* route requires the presence of the HttpOnly session
+ *     cookie. We only check presence here — the signature/expiry/role are
+ *     verified server-side on the next API call. A forged or expired cookie
+ *     still lands on the panel briefly, then AdminGuard bounces it once
+ *     /auth/admin/me returns 401.
  *
- * Why we don't read the JWT here: the JWT lives in localStorage, which
- * the edge runtime can't access. Wiring it into a cookie would solve
- * that, but it's a larger refactor for what is essentially a UX nicety.
+ *   - `ADMIN_SESSION_COOKIE` can be overridden to match a custom backend
+ *     cookie name; defaults to the backend's `alpina_admin_session`.
  */
 
-const allowed = (process.env.ADMIN_ALLOWED_TELEGRAM_IDS ?? "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+const SESSION_COOKIE =
+  process.env.ADMIN_SESSION_COOKIE ?? "alpina_admin_session";
 
 export function middleware(req: NextRequest) {
-  const pathname = req.nextUrl.pathname;
+  const { pathname } = req.nextUrl;
   if (!pathname.startsWith("/admin")) return NextResponse.next();
 
-  // Gate disabled — defer entirely to the backend's role check.
-  if (allowed.length === 0) return NextResponse.next();
+  // The login + logout routes must always be reachable (logout has to be able
+  // to clear an expired cookie without bouncing through the login redirect).
+  if (pathname === "/admin/login" || pathname === "/admin/logout") {
+    return NextResponse.next();
+  }
 
-  const tgId =
-    req.headers.get("x-telegram-id") ??
-    req.cookies.get("tg_id")?.value ??
-    null;
-
-  if (!tgId || !allowed.includes(tgId)) {
+  const hasSession = Boolean(req.cookies.get(SESSION_COOKIE)?.value);
+  if (!hasSession) {
     const url = req.nextUrl.clone();
-    url.pathname = "/";
-    url.searchParams.set("denied", "1");
+    url.pathname = "/admin/login";
+    url.search = "";
     return NextResponse.redirect(url);
   }
 

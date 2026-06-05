@@ -18,8 +18,58 @@ import { env } from "./config/env.js";
  */
 const FORCE_EXIT_TIMEOUT_MS = 10_000;
 
+/**
+ * Boot-time checkout invariant. `OrdersService.create` requires BOTH an
+ * active payment requisite AND an active country; without them every
+ * purchase silently dead-ends (the Mini App blocks before the POST is even
+ * sent). We refuse to boot in that state so a misconfigured deploy is
+ * impossible to miss instead of looking healthy while no one can pay.
+ */
+async function assertCheckoutReady(
+  app: Awaited<ReturnType<typeof buildApp>>,
+): Promise<void> {
+  const [activeRequisites, activeCountries] = await Promise.all([
+    app.prisma.paymentRequisite.count({
+      where: { active: true, deletedAt: null },
+    }),
+    app.prisma.country.count({ where: { active: true } }),
+  ]);
+
+  const problems: string[] = [];
+  if (activeRequisites === 0) {
+    problems.push(
+      "no active PaymentRequisite — checkout cannot create orders (add one via /admin/requisites or run `npm run db:seed`)",
+    );
+  }
+  if (activeCountries === 0) {
+    problems.push(
+      "no active Country — order creation fails with 'No active region is configured'",
+    );
+  }
+
+  if (problems.length > 0) {
+    app.log.fatal(
+      { activeRequisites, activeCountries },
+      `checkout_misconfigured: ${problems.join("; ")}`,
+    );
+    throw new Error(`Checkout misconfigured: ${problems.join("; ")}`);
+  }
+
+  app.log.info({ activeRequisites, activeCountries }, "checkout_ready");
+}
+
 async function main() {
   const app = await buildApp();
+
+  // Fail loudly before accepting traffic if the catalogue can't support a
+  // purchase. Keeps a half-provisioned deploy from looking healthy.
+  try {
+    await assertCheckoutReady(app);
+  } catch (err) {
+    app.log.fatal({ err }, "startup_aborted_checkout_misconfigured");
+    await app.close().catch(() => {});
+    process.exit(1);
+  }
 
   let isShuttingDown = false;
 

@@ -1,9 +1,11 @@
 import fp from "fastify-plugin";
 import fastifyJwt from "@fastify/jwt";
+import fastifyCookie from "@fastify/cookie";
 import type { UserRole } from "@prisma/client";
 import { env } from "../config/env.js";
 import { ForbiddenError, UnauthorizedError } from "../lib/errors.js";
 import { verifyTelegramInitData } from "../modules/auth/telegram-verifier.js";
+import { ADMIN_SESSION_COOKIE } from "../modules/auth/admin-session.js";
 
 /**
  * Registers JWT support, plus two decorators used as preHandlers on routes:
@@ -13,10 +15,15 @@ import { verifyTelegramInitData } from "../modules/auth/telegram-verifier.js";
  *
  * Auth precedence per request:
  *   1. `Authorization: Bearer <jwt>`          (preferred, fast path)
- *   2. `X-Telegram-Init-Data: <raw initData>` (also accepted — frontend uses this)
- *   3. `X-Dev-Telegram-Id: <id>`              (dev only, gated by ALLOW_DEV_AUTH)
+ *   2. `<ADMIN_SESSION_COOKIE>` HttpOnly JWT   (web admin panel — browser, no Telegram)
+ *   3. `X-Telegram-Init-Data: <raw initData>` (also accepted — Mini App frontend uses this)
+ *   4. `X-Dev-Telegram-Id: <id>`              (dev only, gated by ALLOW_DEV_AUTH)
  */
 export const authPlugin = fp(async (app) => {
+  // Cookie parsing must be registered before we read req.cookies / set
+  // cookies on the reply (admin login handler).
+  await app.register(fastifyCookie);
+
   await app.register(fastifyJwt, {
     secret: env.JWT_SECRET,
     sign: { expiresIn: env.JWT_ACCESS_TTL },
@@ -38,7 +45,26 @@ export const authPlugin = fp(async (app) => {
       }
     }
 
-    // 2) Telegram initData (the existing frontend uses this header).
+    // 2) HttpOnly session cookie (web admin panel). The cookie carries the
+    //    same JWT we issue for Bearer auth — just delivered out of reach of
+    //    client-side JS so an XSS can't exfiltrate it.
+    const cookieToken = req.cookies?.[ADMIN_SESSION_COOKIE];
+    if (typeof cookieToken === "string" && cookieToken.length > 0) {
+      try {
+        const payload = app.jwt.verify<{ sub: string; tg: string; role: UserRole }>(
+          cookieToken,
+        );
+        const user = await app.prisma.user.findUnique({ where: { id: payload.sub } });
+        if (!user || user.bannedAt) throw new UnauthorizedError("Account is not active");
+        req.user = { id: user.id, telegramId: user.telegramId.toString(), role: user.role };
+        return;
+      } catch (err) {
+        if (err instanceof UnauthorizedError) throw err;
+        throw new UnauthorizedError("Invalid session");
+      }
+    }
+
+    // 3) Telegram initData (the existing Mini App frontend uses this header).
     const initData = req.headers["x-telegram-init-data"];
     if (typeof initData === "string" && initData.length > 0) {
       const verified = verifyTelegramInitData(initData, {
@@ -54,7 +80,7 @@ export const authPlugin = fp(async (app) => {
       return;
     }
 
-    // 3) Dev-only bypass — never enabled in prod (env validator enforces).
+    // 4) Dev-only bypass — never enabled in prod (env validator enforces).
     if (env.ALLOW_DEV_AUTH) {
       const devId = req.headers["x-dev-telegram-id"];
       if (typeof devId === "string" && devId.length > 0) {

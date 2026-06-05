@@ -69,6 +69,22 @@ function PurchaseInner() {
     (plansRes.loading && plans.length === 0) ||
     (requisitesRes.loading && requisites.length === 0);
 
+  // No active payment card => checkout cannot proceed. This is the silent
+  // root cause of "purchase does nothing": `goToPayment` would return before
+  // any POST. We surface it visibly and block the CTA instead.
+  const noPaymentMethod = !initialLoading && !requisite;
+
+  // Admin-facing breadcrumb in the browser console for whoever debugs it.
+  useEffect(() => {
+    if (noPaymentMethod) {
+      console.error(
+        "[purchase][admin] No active payment requisite configured — users cannot purchase. " +
+          "GET /api/payments/requisites returned empty. Fix: create + activate a card in /admin/requisites " +
+          "(and ensure an active Country exists), then redeploy or run `npm run db:seed`.",
+      );
+    }
+  }, [noPaymentMethod]);
+
   function back() {
     haptic("light");
     setStep((s) => Math.max(s - 1, 0));
@@ -76,8 +92,20 @@ function PurchaseInner() {
 
   // Plan → Pay: create the order once (reuse if we already did), then advance.
   async function goToPayment() {
-    if (!planId) return;
+    console.info("[purchase] goToPayment", {
+      planId,
+      hasRequisite: !!requisite,
+      hasOrder: !!order,
+    });
+    if (!planId) {
+      console.warn("[purchase] goToPayment aborted: no plan selected");
+      return;
+    }
     if (!requisite) {
+      console.error(
+        "[purchase] goToPayment BLOCKED: no active payment requisite — POST /api/orders not sent. " +
+          "Configure an active card in /admin/requisites (or seed the DB).",
+      );
       toast.error(t.purchase.noActiveCard);
       return;
     }
@@ -148,7 +176,7 @@ function PurchaseInner() {
       : t.purchase.submitReceipt;
 
   const ctaDisabled = onPlanStep
-    ? creating || !planId || !plan
+    ? creating || !planId || !plan || !requisite
     : submitting || !file;
 
   return (
@@ -161,6 +189,13 @@ function PurchaseInner() {
         {initialLoading ? (
           <div className="flex items-center justify-center py-20 text-muted-foreground">
             <Loader2 className="h-5 w-5 animate-spin" />
+          </div>
+        ) : noPaymentMethod ? (
+          <div
+            role="alert"
+            className="rounded-3xl border border-red-400/25 bg-red-400/[0.06] p-5 text-sm leading-relaxed text-red-200"
+          >
+            {t.purchase.noActiveCard}
           </div>
         ) : (
           <AnimatePresence mode="wait" initial={false}>

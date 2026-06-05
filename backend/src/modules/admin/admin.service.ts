@@ -117,4 +117,34 @@ export class AdminService {
       return updated;
     });
   }
+
+  /**
+   * Block / unblock a user. Blocking stamps `bannedAt` (so the auth plugin
+   * rejects the account on its next request) and records an optional reason;
+   * unblocking clears both. Self-ban is refused for the same lock-out reason
+   * as self-role-change.
+   */
+  async setUserBan(
+    actorId: string,
+    userId: string,
+    banned: boolean,
+    reason?: string,
+  ) {
+    if (actorId === userId) {
+      throw new ForbiddenError("Cannot block your own account");
+    }
+
+    const before = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+    });
+    const alreadyInState = banned === (before.bannedAt !== null);
+    if (alreadyInState) return before;
+
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: banned
+        ? { bannedAt: new Date(), banReason: reason ?? null }
+        : { bannedAt: null, banReason: null },
+    });
+  }
 }

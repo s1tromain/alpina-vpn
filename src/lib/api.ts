@@ -189,6 +189,25 @@ export const api = {
       }),
     me: (initData?: string) =>
       request<User>("/auth/me", { telegramInitData: initData }),
+
+    /**
+     * Web admin panel (browser, outside Telegram). Credentials are sent with
+     * `credentials: "include"` and the backend replies with an HttpOnly
+     * session cookie — the SPA never sees the raw JWT.
+     */
+    adminLogin: (username: string, password: string) =>
+      request<{ user: User }>("/auth/admin/login", {
+        method: "POST",
+        json: { username, password },
+        skipUnauthorizedHandler: true,
+      }),
+    adminLogout: () =>
+      request<{ ok: true }>("/auth/admin/logout", {
+        method: "POST",
+        skipUnauthorizedHandler: true,
+      }),
+    adminMe: () =>
+      request<User>("/auth/admin/me", { skipUnauthorizedHandler: true }),
   },
 
   users: {
@@ -206,8 +225,21 @@ export const api = {
     get: (id: string) => request<Order>(`/orders/${encodeURIComponent(id)}`),
     // The backend pins region + payment card automatically; the user only
     // chooses a plan. Creates the order in the `created` state.
-    create: (body: { planId: string }) =>
-      request<Order>("/orders", { method: "POST", json: body }),
+    create: (body: { planId: string }) => {
+      // Diagnostic: trace the order POST so a missing request is obvious in
+      // the browser console (root-caused a "purchase does nothing" report).
+      console.info("[purchase] api.orders.create → POST /api/orders", body);
+      return request<Order>("/orders", { method: "POST", json: body }).then(
+        (order) => {
+          console.info("[purchase] api.orders.create ✓ created", order.id);
+          return order;
+        },
+        (err) => {
+          console.error("[purchase] api.orders.create ✗ failed", err);
+          throw err;
+        },
+      );
+    },
     cancel: (orderId: string) =>
       request<Order>(`/orders/${encodeURIComponent(orderId)}/cancel`, {
         method: "POST",
@@ -321,6 +353,11 @@ export const api = {
       request<{ id: string; role: string }>(
         `/admin/users/${encodeURIComponent(userId)}/role`,
         { method: "PATCH", json: { role } },
+      ),
+    setUserBan: (userId: string, banned: boolean, reason?: string) =>
+      request<{ id: string; banned: boolean }>(
+        `/admin/users/${encodeURIComponent(userId)}/ban`,
+        { method: "PATCH", json: { banned, reason } },
       ),
     requisites: {
       list: () => request<PaymentRequisite[]>("/admin/requisites"),

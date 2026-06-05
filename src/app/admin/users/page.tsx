@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Search, Crown, ShieldCheck, Loader2 } from "lucide-react";
+import { Search, Crown, ShieldCheck, Loader2, Ban, Check } from "lucide-react";
+import { toast } from "sonner";
 import { AdminTopbar } from "@/components/admin/admin-topbar";
 import { DataTable } from "@/components/admin/data-table";
 import { Input } from "@/components/ui/input";
@@ -13,12 +14,13 @@ import {
   TabsTrigger,
   TabsContent,
 } from "@/components/ui/tabs";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useResource } from "@/hooks/use-resource";
+import { useAdminStore } from "@/stores/admin-store";
 import { shortName } from "@/lib/utils";
 import { useFormatters } from "@/hooks/use-formatters";
 import { useTranslations, format } from "@/hooks/use-translations";
-import type { UserRole } from "@/types";
+import type { User, UserRole } from "@/types";
 
 export default function AdminUsersPage() {
   const t = useTranslations();
@@ -26,10 +28,13 @@ export default function AdminUsersPage() {
   const [query, setQuery] = useState("");
   const [role, setRole] = useState<UserRole | "all">("all");
 
+  const me = useAdminStore((s) => s.admin);
+  const canManage = me?.role === "admin";
+
   // Server-side search via the backend's ?search= param. Pagination is
   // hard-capped at 200 — wire to a paginated table once the user count
   // outgrows that.
-  const { data, loading } = useResource(
+  const { data, loading, refresh } = useResource(
     () =>
       api.admin.users({
         take: 200,
@@ -44,6 +49,39 @@ export default function AdminUsersPage() {
     () => (role === "all" ? users : users.filter((u) => u.role === role)),
     [users, role],
   );
+
+  // Per-row in-flight flag so we can disable the row's controls while a
+  // mutation is pending.
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  async function changeRole(u: User, next: UserRole) {
+    if (next === u.role) return;
+    setBusyId(u.id);
+    try {
+      await api.admin.setUserRole(u.id, next);
+      toast.success(format(t.admin.users.toastRoleChanged, { role: t.roles[next] }));
+      await refresh();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : t.errors.updateFailed);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function toggleBan(u: User) {
+    setBusyId(u.id);
+    try {
+      await api.admin.setUserBan(u.id, !u.banned);
+      toast.success(
+        u.banned ? t.admin.users.toastUnblocked : t.admin.users.toastBlocked,
+      );
+      await refresh();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : t.errors.updateFailed);
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   return (
     <>
@@ -117,16 +155,24 @@ export default function AdminUsersPage() {
               },
               {
                 header: t.admin.users.cols.role,
-                cell: (u) =>
-                  u.role === "admin" ? (
-                    <Badge variant="premium">
-                      <ShieldCheck className="h-3 w-3" /> {t.roles.admin}
-                    </Badge>
-                  ) : u.role === "operator" ? (
-                    <Badge variant="warning">{t.roles.operator}</Badge>
-                  ) : (
-                    <Badge variant="outline">{t.roles.member}</Badge>
-                  ),
+                cell: (u) => (
+                  <div className="flex items-center gap-2">
+                    {u.role === "admin" ? (
+                      <Badge variant="premium">
+                        <ShieldCheck className="h-3 w-3" /> {t.roles.admin}
+                      </Badge>
+                    ) : u.role === "operator" ? (
+                      <Badge variant="warning">{t.roles.operator}</Badge>
+                    ) : (
+                      <Badge variant="outline">{t.roles.member}</Badge>
+                    )}
+                    {u.banned && (
+                      <Badge variant="destructive">
+                        <Ban className="h-3 w-3" /> {t.admin.users.blocked}
+                      </Badge>
+                    )}
+                  </div>
+                ),
               },
               {
                 header: t.admin.users.cols.tier,
@@ -158,11 +204,51 @@ export default function AdminUsersPage() {
               {
                 header: "",
                 align: "right",
-                cell: () => (
-                  <Button variant="ghost" size="sm">
-                    {t.common.view}
-                  </Button>
-                ),
+                cell: (u) => {
+                  // Role management is admin-only (backend enforces too), and
+                  // an admin can't change/block their own account.
+                  if (!canManage || u.id === me?.id) {
+                    return (
+                      <span className="text-[11px] text-muted-foreground">—</span>
+                    );
+                  }
+                  const isBusy = busyId === u.id;
+                  return (
+                    <div className="flex items-center justify-end gap-2">
+                      <select
+                        aria-label={t.admin.users.cols.role}
+                        value={u.role}
+                        disabled={isBusy}
+                        onChange={(e) =>
+                          void changeRole(u, e.target.value as UserRole)
+                        }
+                        className="rounded-lg border border-white/10 bg-graphite-950/60 px-2 py-1.5 text-xs outline-none focus:border-white/20 disabled:opacity-50"
+                      >
+                        <option value="user">{t.roles.member}</option>
+                        <option value="operator">{t.roles.operator}</option>
+                        <option value="admin">{t.roles.admin}</option>
+                      </select>
+                      <Button
+                        size="sm"
+                        variant={u.banned ? "secondary" : "ghost"}
+                        disabled={isBusy}
+                        onClick={() => void toggleBan(u)}
+                        className={u.banned ? "" : "text-red-300 hover:text-red-200"}
+                      >
+                        {isBusy ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : u.banned ? (
+                          <Check className="h-3.5 w-3.5" />
+                        ) : (
+                          <Ban className="h-3.5 w-3.5" />
+                        )}
+                        {u.banned
+                          ? t.admin.users.unblock
+                          : t.admin.users.block}
+                      </Button>
+                    </div>
+                  );
+                },
               },
             ]}
           />
